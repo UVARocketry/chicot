@@ -18,7 +18,7 @@ There are numerous reasons, most of them boil down to the fact that platformio's
 
 The solution is this monstrosity of a build script. It autogenerates:
 
-0. platformio.ini
+1. platformio.ini
 0. library.json (for dependencies to be usable from platformio)
 0. LSP Information
 
