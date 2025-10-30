@@ -854,7 +854,10 @@ fn getPythonIncludePath(
 
 /// Returns the path for the python lib to be linked into the python modules.
 /// REQUIRES python to be installed
-fn getPythonLibraryPath(python_exe: []const u8, allocator: std.mem.Allocator) ![]const u8 {
+fn getPythonLibraryPath(
+    python_exe: []const u8,
+    allocator: std.mem.Allocator,
+) ![]const u8 {
     const includeResult = try runProcess(.{
         .allocator = allocator,
         .argv = &.{
@@ -888,4 +891,8 @@ fn getPythonLDVersion(python_exe: []const u8, allocator: std.mem.Allocator) ![]c
     return includeResult.stdout;
 }
 
-const runProcess = if (builtin.zig_version.minor >= 12) std.process.Child.run else std.process.Child.exec;
+const runProcess =
+    if (builtin.zig_version.minor >= 12)
+        std.process.Child.run
+    else
+        std.process.Child.exec;

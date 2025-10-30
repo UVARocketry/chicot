@@ -52,3 +52,7 @@ const flagsFromRoot   = b.option([][]const u8,   "rootFlags", "idk");
 ```
 
 once it's in a string array form it's very ez to parse: `-I`, `-D`, `-l`, `-L`, etc
+
+## Implementation Plan
+
+
