@@ -258,14 +258,18 @@ pub fn getPythonInfo(b: *std.Build, pythonExe: ?[]const u8) PythonInfo {
 
 pub const Modules = struct {
     libzig: *std.Build.Step.Compile,
+    libzigMod: *std.Build.Module,
     zigobject: *std.Build.Step.Compile,
     compatHeadersDir: []const u8,
     depHeadersDir: []const u8,
     platformioClangdCompatHeaders: *std.Build.Step.Compile,
+    rootMod: ?*std.Build.Module,
     lib: *std.Build.Step.Compile,
     headerLib: *std.Build.Step.Compile,
     depHeaderLib: *std.Build.Step.Compile,
+    pythonMod: ?*std.Build.Module,
     python: ?*std.Build.Step.Compile,
+    exeMod: ?*std.Build.Module,
     exe: ?*std.Build.Step.Compile,
 };
 
@@ -441,6 +445,10 @@ pub fn createModulesAndLibs(
         .depHeaderLib = depHeaderLib,
         .python = python,
         .exe = exe,
+        .pythonMod = pythonMod,
+        .exeMod = exeMod,
+        .rootMod = rootMod,
+        .libzigMod = libzigMod,
         .zigobject = zigobject,
     };
 }
@@ -479,7 +487,17 @@ pub fn makeBuildModeListString(alloc: std.mem.Allocator, thing: ZonType) ![]cons
     }
 }
 
-pub fn build(b: *std.Build, chicot: *std.Build.Dependency, zon: anytype) !void {
+const BuildOptions = struct {};
+
+// TODO: this should return the built modules so that the user can modify them and add their own files
+
+pub fn build(
+    b: *std.Build,
+    chicot: *std.Build.Dependency,
+    zon: anytype,
+    options: BuildOptions,
+) !Modules {
+    _ = options;
     const projectName = @tagName(zon.name);
 
     // parse the entire buildmodes object
@@ -747,6 +765,7 @@ pub fn build(b: *std.Build, chicot: *std.Build.Dependency, zon: anytype) !void {
             }
         }
     }
+    return modules;
 }
 
 pub fn resolveCppInfo(
@@ -823,7 +842,11 @@ fn getPythonIncludePath(
 ) ![]const u8 {
     const includeResult = try runProcess(.{
         .allocator = allocator,
-        .argv = &.{ python_exe, "-c", "import sysconfig; print(sysconfig.get_path('include'), end='')" },
+        .argv = &.{
+            python_exe,
+            "-c",
+            "import sysconfig; print(sysconfig.get_path('include'), end='')",
+        },
     });
     defer allocator.free(includeResult.stderr);
     return includeResult.stdout;
@@ -834,7 +857,11 @@ fn getPythonIncludePath(
 fn getPythonLibraryPath(python_exe: []const u8, allocator: std.mem.Allocator) ![]const u8 {
     const includeResult = try runProcess(.{
         .allocator = allocator,
-        .argv = &.{ python_exe, "-c", "import sysconfig; print(sysconfig.get_config_var('LIBDIR'), end='')" },
+        .argv = &.{
+            python_exe,
+            "-c",
+            "import sysconfig; print(sysconfig.get_config_var('LIBDIR'), end='')",
+        },
     });
     defer allocator.free(includeResult.stderr);
     return includeResult.stdout;
