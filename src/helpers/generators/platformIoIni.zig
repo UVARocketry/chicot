@@ -190,8 +190,8 @@ pub fn main() !void {
             for (cppInfo.include) |inc| {
                 try outIow.print(" -I{s}", .{inc});
             }
-            for (cppInfo.link) |inc| {
-                try outIow.print(" -l{s}", .{inc});
+            for (cppInfo.linkPath) |inc| {
+                try outIow.print(" -L{s}", .{inc});
             }
             for (cppInfo.otherFlags) |inc| {
                 try outIow.print(" {s}", .{inc});

@@ -75,8 +75,207 @@ pub const BuildInfo = struct {
     pub const CppInfo = struct {
         define: ?zonParse.Map(?[]const u8) = null,
         include: [][]const u8 = &.{},
-        link: [][]const u8 = &.{},
+        linkPath: [][]const u8 = &.{},
         otherFlags: [][]const u8 = &.{},
+        requiredFlags: [][]const u8 = &.{},
+        overrideableFlags: [][]const u8 = &.{},
+
+        /// Caller is responsible for freeing the ArrayList AND all of its members
+        pub fn createFlagsArray(
+            self: *const CppInfo,
+            alloc: std.mem.Allocator,
+        ) ![]const []const u8 {
+            var ret: std.ArrayListUnmanaged([]const u8) = .empty;
+
+            if (self.define) |define| {
+                var iter = define.map.iterator();
+                while (iter.next()) |v| {
+                    const val = v.value_ptr.* orelse continue;
+                    if (val.len == 0) {
+                        try ret.append(
+                            alloc,
+                            try std.fmt.allocPrint(alloc, "-D{s}", .{v.key_ptr.*}),
+                        );
+                    } else {
+                        try ret.append(
+                            alloc,
+                            try std.fmt.allocPrint(
+                                alloc,
+                                "-D{s}={s}",
+                                .{ v.key_ptr.*, val },
+                            ),
+                        );
+                    }
+                }
+            }
+
+            for (self.include) |inc| {
+                try ret.append(
+                    alloc,
+                    try std.fmt.allocPrint(alloc, "-I{s}", .{inc}),
+                );
+            }
+
+            for (self.linkPath) |link| {
+                try ret.append(
+                    alloc,
+                    try std.fmt.allocPrint(alloc, "-L{s}", .{link}),
+                );
+            }
+
+            for (self.otherFlags) |flag| {
+                try ret.append(
+                    alloc,
+                    try std.fmt.allocPrint(alloc, "{s}", .{flag}),
+                );
+            }
+
+            return try ret.toOwnedSlice(alloc);
+        }
+
+        const ParsedFlag = struct {
+            value: []const u8,
+        };
+        const Define = struct {
+            name: []const u8,
+            value: []const u8,
+        };
+
+        fn parseStartFlag(starts: []const u8, flag: []const u8) ?ParsedFlag {
+            if (std.mem.startsWith(u8, flag, starts)) {
+                return .{
+                    .value = flag[starts.len..],
+                };
+            }
+            return null;
+        }
+
+        fn parseInclude(flag: []const u8) ?ParsedFlag {
+            return parseStartFlag("-I", flag);
+        }
+        fn parseLinkPath(flag: []const u8) ?ParsedFlag {
+            return parseStartFlag("-L", flag);
+        }
+
+        fn parseDefine(flag: []const u8) ?Define {
+            if (!std.mem.startsWith(u8, flag, "-D")) {
+                return null;
+            }
+
+            const rest = flag[2..];
+
+            var split = std.mem.splitScalar(u8, rest, '=');
+            return .{
+                .name = split.next() orelse unreachable,
+                .value = split.next() orelse "",
+            };
+        }
+
+        pub fn flagOverrideable(self: *const CppInfo, flag: []const u8) ?usize {
+            for (self.overrideableFlags, 0..) |f, i| {
+                if (std.mem.startsWith(u8, flag, f)) {
+                    return i;
+                }
+            }
+            return null;
+        }
+
+        pub fn flagRequired(self: *const CppInfo, flag: []const u8) ?usize {
+            for (self.requiredFlags, 0..) |f, i| {
+                if (std.mem.startsWith(u8, flag, f)) {
+                    return i;
+                }
+            }
+            return null;
+        }
+
+        pub fn validateOverridesAndRequires(self: *const CppInfo) !void {
+            for (self.overrideableFlags) |o| {
+                if (std.mem.startsWith(u8, o, "-I")) {
+                    return error.IncludeFlagInOverrideableFlags;
+                }
+                if (std.mem.startsWith(u8, o, "-L")) {
+                    return error.LinkFlagInOverrideableFlags;
+                }
+            }
+            for (self.requiredFlags) |o| {
+                if (std.mem.startsWith(u8, o, "-I")) {
+                    return error.IncludeFlagInRequiredFlags;
+                }
+                if (std.mem.startsWith(u8, o, "-L")) {
+                    return error.LinkFlagInRequiredFlags;
+                }
+            }
+        }
+
+        pub fn addFlags(self: *CppInfo, alloc: std.mem.Allocator, flags: []const []const u8, diagnostic: *?[]const u8) !void {
+            var requiredFlagsBitset: std.bit_set.DynamicBitSetUnmanaged = try .initFull(alloc, self.requiredFlags.len);
+            defer requiredFlagsBitset.deinit(alloc);
+            requiredFlagsBitset.unsetAll();
+
+            var retOtherFlags: std.ArrayList([]const u8) = .empty;
+            defer retOtherFlags.deinit(alloc);
+            try retOtherFlags.appendSlice(alloc, self.otherFlags);
+
+            for (flags) |flag| {
+                const overrideable = self.flagOverrideable(flag);
+                const required = self.flagRequired(flag);
+
+                if (overrideable == null and required == null) {
+                    continue;
+                }
+
+                if (required) |index| {
+                    requiredFlagsBitset.set(index);
+                }
+
+                // two cases:
+                //
+                // 1. define: we just do a set no matter what
+                // 2. not define:
+                //  - if overrideable: we replace a value in the array, throw error if no matching value found
+                //  - if just required: we append to array.
+                if (parseDefine(flag)) |define| {
+                    if (overrideable != null) {
+                        if (self.define == null) {
+                            diagnostic.* = flag;
+                            return error.OverrideableDefineFlagNotFound;
+                        }
+                        if (!self.define.?.hasKey(define.name)) {
+                            diagnostic.* = flag;
+                            return error.OverrideableDefineFlagNotFound;
+                        }
+                    }
+                    self.define = self.define orelse .init(alloc);
+                    try self.define.?.set(define.name, define.value);
+                } else {
+                    if (overrideable) |overrideIndex| {
+                        const overrideFlag = self.overrideableFlags[overrideIndex];
+
+                        for (self.otherFlags) |otherFlag| {
+                            if (std.mem.startsWith(u8, otherFlag, overrideFlag)) {
+                                break;
+                            }
+                        } else {
+                            diagnostic.* = flag;
+                            return error.OverrideableFlagNotFound;
+                        }
+                        retOtherFlags.items[overrideIndex] = flag;
+                    } else {
+                        try retOtherFlags.append(alloc, flag);
+                    }
+                }
+            }
+
+            // reverse the sets so that we can do a
+            requiredFlagsBitset.toggleAll();
+            while (requiredFlagsBitset.findFirstSet()) |i| {
+                diagnostic.* = self.requiredFlags[i];
+                return error.MissingRequiredFlag;
+            }
+
+            self.otherFlags = try retOtherFlags.toOwnedSlice(alloc);
+        }
     };
 
     __id: ?IdType = null,

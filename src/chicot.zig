@@ -277,12 +277,9 @@ pub const compatHeadersDir = "platformio-clangd-compat-headers";
 
 pub fn createModulesAndLibs(
     b: *std.Build,
-    mode: []const u8,
+    resolvedInfo: FullBuildInfo,
     chicot: *std.Build.Dependency,
-    modeInfo: BuildInfo,
     rootDir: []const u8,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
     projectName: []const u8,
     pyInfo: PythonInfo,
 ) !Modules {
@@ -296,6 +293,10 @@ pub fn createModulesAndLibs(
         "pub fn donotusethisfunction() void {}",
     );
 
+    const target = resolvedInfo.target;
+    const optimize = resolvedInfo.optimize;
+    const cppInfo = resolvedInfo.buildInfo.cpp;
+
     const libzigMod = b.addModule("libzig", .{
         .root_source_file = rootZig orelse emptyFile,
         .target = target,
@@ -308,8 +309,8 @@ pub fn createModulesAndLibs(
         .root_source_file = rootZig,
     });
     const rootSrcDirs: [2][]const u8 = .{ rootDir, mainDir };
-    try addCppFiles(b, rootMod, b.pathJoin(&rootSrcDirs), modeInfo.cpp.otherFlags);
-    resolveCppInfo(b, rootMod, modeInfo.cpp);
+    try addCppFiles(b, rootMod, b.pathJoin(&rootSrcDirs), cppInfo.otherFlags);
+    resolveCppInfo(b, rootMod, cppInfo);
 
     const pythonMod = if (dirExists(pyDir)) blk: {
         const pythonMod = b.addModule("python", .{
@@ -322,9 +323,9 @@ pub fn createModulesAndLibs(
         pythonMod.addIncludePath(.{ .cwd_relative = pyInfo.include });
         pythonMod.addLibraryPath(.{ .cwd_relative = pyInfo.lib });
         const rootPythonDirs: [2][]const u8 = .{ rootDir, pyDir };
-        try addCppFiles(b, pythonMod, b.pathJoin(&rootPythonDirs), modeInfo.cpp.otherFlags);
-        try addCppFiles(b, pythonMod, b.pathJoin(&rootSrcDirs), modeInfo.cpp.otherFlags);
-        resolveCppInfo(b, pythonMod, modeInfo.cpp);
+        try addCppFiles(b, pythonMod, b.pathJoin(&rootPythonDirs), cppInfo.otherFlags);
+        try addCppFiles(b, pythonMod, b.pathJoin(&rootSrcDirs), cppInfo.otherFlags);
+        resolveCppInfo(b, pythonMod, cppInfo);
         break :blk pythonMod;
     } else null;
 
@@ -337,9 +338,9 @@ pub fn createModulesAndLibs(
         exeMod.addImport(projectName, libzigMod);
         exeMod.addIncludePath(b.path(b.pathJoin(&rootSrcDirs)));
         const rootDesktopDirs: [2][]const u8 = .{ rootDir, desktopDir };
-        try addCppFiles(b, exeMod, b.pathJoin(&rootDesktopDirs), modeInfo.cpp.otherFlags);
-        try addCppFiles(b, exeMod, b.pathJoin(&rootSrcDirs), modeInfo.cpp.otherFlags);
-        resolveCppInfo(b, exeMod, modeInfo.cpp);
+        try addCppFiles(b, exeMod, b.pathJoin(&rootDesktopDirs), cppInfo.otherFlags);
+        try addCppFiles(b, exeMod, b.pathJoin(&rootSrcDirs), cppInfo.otherFlags);
+        resolveCppInfo(b, exeMod, cppInfo);
 
         break :blk exeMod;
     } else null;
@@ -405,9 +406,20 @@ pub fn createModulesAndLibs(
         break :blk exe;
     } else null;
 
-    for (modeInfo.dependencies) |depInfo| {
+    for (resolvedInfo.buildInfo.dependencies) |depInfo| {
+        var rootFlags: []const []const u8 = undefined;
+        var parentFlags: []const []const u8 = undefined;
+        if (resolvedInfo.rootFlags) |r| {
+            rootFlags = r;
+            parentFlags = resolvedInfo.currentFlags;
+        } else {
+            rootFlags = resolvedInfo.currentFlags;
+            parentFlags = &.{};
+        }
         const dep = b.dependency(depInfo.dependencyName, .{
-            .mode = mode,
+            .mode = @tagName(resolvedInfo.buildType),
+            .__flagsFromRoot = rootFlags,
+            .__flagsFromParent = parentFlags,
             .target = target,
             .optimize = optimize,
         });
@@ -487,19 +499,17 @@ pub fn makeBuildModeListString(alloc: std.mem.Allocator, thing: ZonType) ![]cons
     }
 }
 
-const BuildOptions = struct {};
+const FullBuildInfo = struct {
+    buildInfo: BuildInfo,
+    rootFlags: ?[]const []const u8,
+    currentFlags: []const []const u8,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    buildType: enum { teensy41, desktop },
+    selectedMode: []const u8,
+};
 
-// TODO: this should return the built modules so that the user can modify them and add their own files
-
-pub fn build(
-    b: *std.Build,
-    chicot: *std.Build.Dependency,
-    zon: anytype,
-    options: BuildOptions,
-) !Modules {
-    _ = options;
-    const projectName = @tagName(zon.name);
-
+pub fn resolveBuildInformation(b: *std.Build, zon: anytype) !FullBuildInfo {
     // parse the entire buildmodes object
     var thing = zonParse.parseZonStruct(
         b.allocator,
@@ -507,6 +517,24 @@ pub fn build(
         zon.buildmodes,
         ".buildmodes",
     );
+
+    // we force the desktop and teensy41 keys so that we can guarantee that subdeps
+    // have these for building
+    if (!thing.map.contains("desktop")) {
+        std.debug.print(
+            "ERROR: build.zig.zon .buildmodes MUST contain a `desktop` field!\n",
+            .{},
+        );
+        return error.MissingDesktopKey;
+    }
+
+    if (!thing.map.contains("teensy41")) {
+        std.debug.print(
+            "ERROR: build.zig.zon .buildmodes MUST contain a `teensy41` field!\n",
+            .{},
+        );
+        return error.MissingTeensy41Key;
+    }
 
     try inherit.resolveInheritance(b.allocator, &thing);
 
@@ -518,10 +546,8 @@ pub fn build(
     );
     try defaults.targets.set("desktop", .{});
 
-    const pyInfo = getPythonInfo(b, null);
-
     const buildModeList = try makeBuildModeListString(b.allocator, thing);
-    // std.debug.print("{s}\n", .{buildModeList});
+
     const mode = blk: {
         const currentStr: []const u8 = try std.fmt.allocPrint(
             b.allocator,
@@ -539,7 +565,69 @@ pub fn build(
         ));
     }
 
-    const modeInfo = thing.get(mode);
+    var modeInfo = thing.get(mode);
+
+    const modeTarget = modeInfo.target orelse "desktop";
+
+    if (!defaults.targets.hasKey(modeTarget)) {
+        std.debug.print("Could not find target key '{s}' in allowed target list: \n", .{modeTarget});
+        var iter = defaults.targets.map.iterator();
+        while (iter.next()) |v| {
+            std.debug.print("  - {s}\n", .{v.key_ptr.*});
+        }
+        return error.KeyNotFound;
+    }
+
+    const targetQuery: std.Target.Query.ParseOptions =
+        defaults.targets.get(modeTarget);
+
+    // basic target stuff.
+    // Since the buildmodes stuff has a target option, then we use that as the default.
+    // This is for not having to change the target when building for the teensy
+    const target = b.standardTargetOptions(.{
+        .default_target = try std.Target.Query.parse(targetQuery),
+    });
+
+    try inherit.resolveInheritance(b.allocator, &thing);
+
+    const osName = @tagName(target.result.os.tag);
+
+    const osMode = try std.fmt.allocPrint(b.allocator, "{s}_{s}", .{ mode, osName });
+
+    if (thing.map.contains(osMode)) {
+        thing.getPtr(mode).inherit = osMode;
+    }
+
+    try inherit.resolveInheritance(b.allocator, &thing);
+
+    const rootFlags = b.option(
+        []const []const u8,
+        "__flagsFromRoot",
+        "INTERNAL ONLY! The flags from the root dependency",
+    );
+
+    const parentFlags = b.option(
+        []const []const u8,
+        "__flagsFromParent",
+        "INTERNAL ONLY! The flags from the parent dependency",
+    );
+
+    var diagnostic: ?[]const u8 = null;
+    if (rootFlags != null and parentFlags != null) {
+        var mergedFlags: std.ArrayList([]const u8) = .empty;
+        defer mergedFlags.deinit(b.allocator);
+        try mergedFlags.appendSlice(b.allocator, parentFlags.?);
+        try mergedFlags.appendSlice(b.allocator, rootFlags.?);
+        for (mergedFlags.items) |merged| {
+            std.debug.print("  - {s}\n", .{merged});
+        }
+        modeInfo.cpp.addFlags(b.allocator, mergedFlags.items, &diagnostic) catch |e| {
+            if (diagnostic) |d| {
+                std.debug.print("Referenced flags: {s}\n", .{d});
+            }
+            return e;
+        };
+    }
 
     std.debug.print("cpp info: \n", .{});
     std.debug.print("  include: \n", .{});
@@ -547,7 +635,7 @@ pub fn build(
         std.debug.print("    - {s}\n", .{inc});
     }
     std.debug.print("  link:\n", .{});
-    for (modeInfo.cpp.link) |link| {
+    for (modeInfo.cpp.linkPath) |link| {
         std.debug.print("    - {s}\n", .{link});
     }
     std.debug.print("  flags:\n", .{});
@@ -562,16 +650,36 @@ pub fn build(
         }
     }
 
-    const modeTarget = modeInfo.target orelse "desktop";
+    const optimize = b.standardOptimizeOption(.{
+        .preferred_optimize_mode = modeInfo.optimize,
+    });
+    return .{
+        .optimize = optimize,
+        .target = target,
+        .buildInfo = modeInfo,
+        .currentFlags = try modeInfo.cpp.createFlagsArray(b.allocator),
+        .rootFlags = rootFlags,
+        .buildType = if (modeInfo.platformio) |_| .teensy41 else .desktop,
+        .selectedMode = mode,
+    };
+}
 
-    if (!defaults.targets.hasKey(modeTarget)) {
-        std.debug.print("Could not find target key '{s}' in allowed target list: \n", .{modeTarget});
-        var iter = defaults.targets.map.iterator();
-        while (iter.next()) |v| {
-            std.debug.print("  - {s}\n", .{v.key_ptr.*});
-        }
-        return error.KeyNotFound;
-    }
+const BuildOptions = struct {};
+
+pub fn build(
+    b: *std.Build,
+    chicot: *std.Build.Dependency,
+    zon: anytype,
+    options: BuildOptions,
+) !Modules {
+    _ = options;
+    const projectName = @tagName(zon.name);
+
+    const resolvedInfo = try resolveBuildInformation(b, zon);
+
+    const rootDir = ".";
+
+    const pyInfo = getPythonInfo(b, null);
 
     const pioDiffMode = b.option(
         bool,
@@ -579,40 +687,15 @@ pub fn build(
         "Whether to diff the generated platformio.ini with the current platformio.ini script",
     ) orelse false;
 
-    const targetQuery: std.Target.Query.ParseOptions =
-        defaults.targets.get(modeTarget);
-
-    // basic target stuff.
-    // Since the buildmodes stuff has a target option, then we use that as the default.
-    // This is for not having to change the target when building for the teensy
-    const target = b.standardTargetOptions(.{
-        .default_target = try std.Target.Query.parse(targetQuery),
-    });
-
-    const optimize = b.standardOptimizeOption(.{
-        .preferred_optimize_mode = modeInfo.optimize,
-    });
-
-    const rootDir = ".";
-
     const modules = try createModulesAndLibs(
         b,
-        mode,
+        resolvedInfo,
         chicot,
-        modeInfo,
         rootDir,
-        target,
-        optimize,
         projectName,
         pyInfo,
     );
 
-    // const helpers = b.addModule("helpers", .{
-    //     .root_source_file = b.path("src/helpers/root.zig"),
-    //     .optimize = .Debug,
-    //     .target = b.resolveTargetQuery(.{}),
-    // });
-    //
     const pioProgramName = blk: {
         const pioProgramName =
             if (builtin.os.tag == .windows) "platformio.exe" else "platformio";
@@ -647,7 +730,7 @@ pub fn build(
         helpers,
         chicot,
         pioProgramName,
-        mode,
+        resolvedInfo.selectedMode,
         modules.depHeadersDir,
     );
 
@@ -656,7 +739,7 @@ pub fn build(
         helpers,
         chicot,
         pioProgramName,
-        mode,
+        resolvedInfo.selectedMode,
         pyInfo.include,
         modules.depHeadersDir,
         modules.platformioClangdCompatHeaders,
@@ -664,27 +747,12 @@ pub fn build(
 
     try addPlatformioIniStep(b, helpers, chicot, pioDiffMode, b.allocator);
 
-    // const echo_program = try b.findProgram(&.{"echo"}, &.{"/usr/bin"});
-    // Get string output from a system tool
-    // const string = b.run(&.{ echo_program, "hello/world" });
-    // const some_path = b.fmt("/my/other/path/{s}", .{string});
-
-    // Specify a system command as a build dependency
-    //    Note: currently will not run as nothing depends on it!
-    // const sys_command_build_dependency = b.addSystemCommand(&.{ "echo", "I'm generating some text!" });
-    //
-    // // Add a dependency on this command that takes the command's stdout and puts it in a file `zig-out/output.txt`
-    // //    Note: Now this does something!
-    // b.getInstallStep().dependOn(&b.addInstallFile(sys_command_build_dependency.captureStdOut(), "output.txt").step);
-    // b.getInstallStep().dependOn(&writeFileStep.step);
-
     const check = b.step("check", "Check if foo compiles");
 
-    // std.debug.print("{f}\n", .{modeInfo});
-
+    const outputTypes = resolvedInfo.buildInfo.outputTypes;
     if (std.mem.containsAtLeastScalar(
         BuildInfo.OutputType,
-        modeInfo.outputTypes,
+        outputTypes,
         1,
         .liball,
     )) {
@@ -694,12 +762,12 @@ pub fn build(
     }
     b.installArtifact(modules.headerLib);
     b.installArtifact(modules.depHeaderLib);
-    if (modeInfo.platformio != null) {
+    if (resolvedInfo.buildInfo.platformio != null) {
         b.installArtifact(modules.platformioClangdCompatHeaders);
     }
     if (std.mem.containsAtLeastScalar(
         BuildInfo.OutputType,
-        modeInfo.outputTypes,
+        outputTypes,
         1,
         .libzig,
     )) {
@@ -711,7 +779,7 @@ pub fn build(
     }
     if (std.mem.containsAtLeastScalar(
         BuildInfo.OutputType,
-        modeInfo.outputTypes,
+        outputTypes,
         1,
         .pythonmodule,
     )) {
@@ -728,7 +796,7 @@ pub fn build(
     }
     if (std.mem.containsAtLeastScalar(
         BuildInfo.OutputType,
-        modeInfo.outputTypes,
+        outputTypes,
         1,
         .exe,
     )) {
@@ -746,7 +814,7 @@ pub fn build(
 
     if (std.mem.containsAtLeastScalar(
         BuildInfo.OutputType,
-        modeInfo.outputTypes,
+        outputTypes,
         1,
         .exe,
     )) {
@@ -776,7 +844,7 @@ pub fn resolveCppInfo(
     for (info.include) |inc| {
         lib.addIncludePath(b.path(inc));
     }
-    for (info.link) |inc| {
+    for (info.linkPath) |inc| {
         lib.linkSystemLibrary(inc, .{});
     }
 

@@ -341,6 +341,10 @@ pub fn main() !void {
             try cflagsiow.print("-I{s}\n", .{inc});
         }
 
+        for (modeInfo.cpp.linkPath) |inc| {
+            try cflagsiow.print("-L{s}\n", .{inc});
+        }
+
         if (modeInfo.cpp.define) |d| {
             var iter = d.map.iterator();
 

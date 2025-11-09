@@ -13,7 +13,7 @@
     },
     // we should prolly have a rocketry build version that we can parse to determine
     // if we are out of date or something
-    .rocketrybuildversion = "0.0.0",
+    .chicotversion = "0.0.0",
     .builddefaults = .{
         .mode = "desktop",
         .targets = .{
@@ -34,13 +34,23 @@
                 .define = .{
                     .FLOAT = "float",
                 },
+                // this makes it so that -DFLOAT can be overriden
+                .overrideableFlags = .{
+                    "-DFLOAT",
+                },
+                // this makes it so that parent dependencies MUST specify -DFLOAT
+                //
+                // okok so if there's already a flag that matches and we get a flag that matches this, it's an error if it's not in overrideableFlags!
+                //
+                // so overrideableFlags says what flags can be *replaced*
+                // and requiredFlags says what flags can be *added*
+                //
+                // if in both, it *must* be *replaced*, but ONLY if we arent a root dep
+                .requiredFlags = .{
+                    "-DFLOAT",
+                },
             },
-            .dependencies = .{
-                // .{
-                //     .importName = "dep",
-                //     .dependencyName = "dep",
-                // },
-            },
+            .dependencies = .{},
             .inherit = null,
             .outputTypes = .{},
         },

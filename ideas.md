@@ -53,6 +53,10 @@ const flagsFromRoot   = b.option([][]const u8,   "rootFlags", "idk");
 
 once it's in a string array form it's very ez to parse: `-I`, `-D`, `-l`, `-L`, etc
 
-## Implementation Plan
+some build flags need to be overrideable by the parent (eg `-DFLOAT`) MUST ONLY BE SET IN ONE PLACE!!! (otherwise there will be very *very* odd/confusing/annoying abi compat issues). How do we want to specify that some flags (just macros?) should be overriden? we could default to ALL macros being overriden and nothing else? we could add some field like `overrideableFlags` or something?
 
+## OKOKOK
 
+sooooo... we need to decouple the mode passing. really, mode passing is only for a user facing thing? like really the only reason for modes is js to group c++ flags. dependencies can have flags overriden by setting `.cpp.overrideableFlags`. like with flag passing, we dont *really* need modes ykyk. flag resolution for building only needs to happen on desktop lowkey. so like ig the way it works is users can set `-Dmode=`. sooo myabe maybe idrk but basically `desktop` mode is what we get the flags for building libs from and then the passed flags overrides/modifies the flags for the lib. 
+
+yehh flag resolution doesnt even matter on platformio builds bc we dont care about flags on libzig. this might change in the future for conditional compilation but c'est la vie
