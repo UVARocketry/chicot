@@ -11,8 +11,6 @@
         "src",
         "platformio_clangd",
     },
-    // we should prolly have a rocketry build version that we can parse to determine
-    // if we are out of date or something
     .chicotversion = "0.0.0",
     .builddefaults = .{
         .mode = "desktop",
@@ -23,8 +21,8 @@
             },
         },
     },
-    .buildmodes = .{
-        // shared stuff between everyone
+    .buildmodes2 = .{
+        // basic inheritance like before
         .shared = .{
             .description = "Common parameters shared between all build modes",
             .cpp = .{
@@ -54,31 +52,10 @@
             .inherit = null,
             .outputTypes = .{},
         },
-        .desktopshared = .{
-            .inherit = "shared",
-            .description = "Common parameters for desktop build modes",
-            .cpp = .{
-                .otherFlags = .{
-                    // need to have these on not-platformio bc otherwise it throws
-                    // a billion errors from the arduino libraries.
-                    // it's good to have these on desktop bc it forces you to
-                    // write better code
-                    "-Wall",
-                    "-Wextra",
-                    "-Wpedantic",
-                    "-Wno-gnu-anonymous-struct",
-                    "-Wno-nested-anon-types",
-                },
-                .define = .{},
-            },
-        },
-        .platformioshared = .{
+        // this is for the teensy4.1 board
+        .teensy41 = .{
             .inherit = "shared",
             .description = "Shared info for platformio stuff",
-            .outputTypes = .{
-                .libzig,
-            },
-            .target = "teensy",
             .platformio = .{
                 .platform = "teensy",
                 .board = "teensy41",
@@ -104,44 +81,52 @@
                 },
                 // lib_deps and extra_scripts should be given defaults from zig
             },
-        },
-        .header = .{
-            .description = "build stuff for header only libraries",
-        },
-        .teensy41 = .{
-            .inherit = "platformioshared",
-            .description = "build stuff for platformio libs",
-        },
-        .groundstation = .{
-            .inherit = "platformioshared",
-            .description = "build stuff for platformio groundstation",
-            .target = "teensy",
-        },
-        // this mode should build zig and all C++ files that ARENT for exe OR python
-        // this can then be linked into an actual application building for python or exe
-        //
-        // building header only libs should also prolly be here
-        .lib = .{
-            .inherit = "desktopshared",
-            .description = "building the C++ and zig files that arent necessary for exe or python",
+            .target = .{
+                .arch_os_abi = "thumb-freestanding-eabihf",
+                .cpu_features = "cortex_m7",
+            },
             .outputTypes = .{
-                .liball,
+                .libzig,
             },
         },
+        // desktop also implicitly inherits from desktop_{currentos}
         .desktop = .{
-            .inherit = "desktopshared",
-            .description = "Building a testable desktop executable",
             .outputTypes = .{
+                .libzig,
                 .exe,
                 .pythonmodule,
+                .liball,
+            },
+            .inherit = "shared",
+            .description = "Common parameters for desktop build modes",
+            .cpp = .{
+                .otherFlags = .{
+                    // need to have these on not-platformio bc otherwise it throws
+                    // a billion errors from the arduino libraries.
+                    // it's good to have these on desktop bc it forces you to
+                    // write better code
+                    "-Wall",
+                    "-Wextra",
+                    "-Wpedantic",
+                    "-Wno-gnu-anonymous-struct",
+                    "-Wno-nested-anon-types",
+                },
+                .define = .{},
             },
         },
-        .python = .{
-            .inherit = "desktopshared",
-            .outputTypes = .{
-                .pythonmodule,
+        .desktop_windows = .{
+            // on the eigen side.
+            // this field is prolly *only* for header libs just bc
+            .requiredFlags = .{
+                "-DEIGEN_DONT_VECTORIZE",
             },
-            .description = "Building a python module that can be imported into python programs",
+
+            .cpp = .{
+                // on the not eigen side
+                .define = .{
+                    .EIGEN_DONT_VECTORIZE = "",
+                },
+            },
         },
     },
 }

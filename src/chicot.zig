@@ -10,6 +10,8 @@ const ZonType = buildInfo.ZonType;
 const BuildDefaults = buildInfo.BuildDefaults;
 const BuildInfo = buildInfo.BuildInfo;
 
+pub const version = "0.0.0";
+
 pub const mainDir = "src";
 pub const desktopDir = "desktop";
 pub const pyDir = "python";
@@ -151,14 +153,21 @@ pub fn addDesktopLspStep(
     runLsp.addArg(mode);
     runLsp.addArg(pythonInc);
     runLsp.addArg(depHeadersDir);
+    // TODO: pass the os we are building for so that it can inherit desktop_{os}
+    // info properly
+
     // keep this in here just in case we merge pioLspInfo and desktopLspInfo
     runLsp.addDirectoryArg(platformioClangdCompatHeaders.getEmittedIncludeTree());
     const outputCompFlags = runLsp.addOutputFileArg("compile_flags.txt");
     const outputCppProps = runLsp.addOutputFileArg(".vscode/c_cpp_properties.json");
+    // TODO: detect missing cppprops, and replace with empty thing
     runLsp.addFileArg(b.path(".vscode/c_cpp_properties.json"));
 
     const installCompFlags = b.addInstallFile(outputCompFlags, "compile_flags.txt");
-    const installCppProps = b.addInstallFile(outputCppProps, ".vscode/c_cpp_properties.json");
+    const installCppProps = b.addInstallFile(
+        outputCppProps,
+        ".vscode/c_cpp_properties.json",
+    );
 
     b.installArtifact(lspProgram);
 
@@ -345,12 +354,6 @@ pub fn createModulesAndLibs(
         break :blk exeMod;
     } else null;
 
-    const libzig = b.addLibrary(.{
-        .name = "zig",
-        .linkage = .static,
-        .root_module = libzigMod,
-    });
-
     // const path = writeStep.add("asdg", "ooga");
     // path.addStepDependencies(other_step: *Step)
     const emptyMod = b.createModule(.{
@@ -359,12 +362,28 @@ pub fn createModulesAndLibs(
         .root_source_file = emptyFile,
     });
 
+    const libzigActual = b.addLibrary(.{
+        .name = "zig",
+        .linkage = .static,
+        .root_module = libzigMod,
+    });
+
+    // libzig.link_gc_sections = false;
+
+    const libzig = b.addLibrary(.{
+        .name = "zigactual",
+        .linkage = .static,
+        .root_module = emptyMod,
+    });
+
+    libzig.linkLibrary(libzigActual);
+
     const headerLib = b.addLibrary(.{
         .name = "headers",
         .linkage = .static,
         .root_module = emptyMod,
     });
-    headerLib.installHeadersDirectory(b.path(mainDir), projectName, .{});
+    headerLib.installHeadersDirectory(b.path(mainDir), "", .{});
 
     const depHeadersDir = "depheaders";
     const depHeaderLib = b.addLibrary(.{
@@ -426,7 +445,8 @@ pub fn createModulesAndLibs(
 
         const mainMod = dep.module("root");
         const depLibZigMod = dep.module("libzig");
-        const depZigObject = dep.artifact("zigobject");
+        const depLibZig = dep.artifact("zigactual");
+        // const depLibZigObj = dep.artifact("zigobject");
         const headers = dep.artifact("headers");
 
         rootMod.addImport(depInfo.importName orelse depInfo.dependencyName, mainMod);
@@ -437,15 +457,14 @@ pub fn createModulesAndLibs(
         if (exeMod) |mod| {
             mod.addImport(depInfo.importName orelse depInfo.dependencyName, mainMod);
         }
-        depHeaderLib.installHeadersDirectory(headers.getEmittedIncludeTree(), "", .{});
+        depHeaderLib.installHeadersDirectory(headers.getEmittedIncludeTree(), depHeadersDir, .{});
 
         libzigMod.addImport(
             depInfo.importName orelse depInfo.dependencyName,
             depLibZigMod,
         );
-        libzigMod.addObject(depZigObject);
-
-        // libMod.addImport(depInfo.importName, mainMod);
+        std.debug.print("Adding object and stuff for {s}!\n", .{depInfo.dependencyName});
+        libzig.linkLibrary(depLibZig);
     }
     return .{
         .libzig = libzig,

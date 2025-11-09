@@ -50,8 +50,8 @@ pub fn getFileContents(
     return buf;
 }
 
-/// A std.Io.Reader implementation that discards the comments from
-/// a passed std.Io.Reader as it reads the data.
+/// A std.Io.Reader implementation that discards the line comments from
+/// a passed std.Io.Reader as it reads the data (assuming that data is in json format).
 pub const JsonCommentDiscardReader = struct {
     reader: *std.Io.Reader,
     interface: std.Io.Reader,
@@ -262,8 +262,6 @@ pub const JsonCommentDiscardReader = struct {
 };
 
 pub fn main() !void {
-    // var cwdBuf: [500]u8 = undefined;
-
     const allocator = std.heap.smp_allocator;
     var zonParseArena: std.heap.ArenaAllocator = .init(allocator);
     const arena = zonParseArena.allocator();
@@ -380,6 +378,7 @@ pub fn main() !void {
         );
         defer jsonScanner.deinit();
 
+        // TODO: For invalid json files, just overwrite them
         var v = try std.json.parseFromTokenSource(CppPropsJson, arena, &jsonScanner, .{});
         defer v.deinit();
 
