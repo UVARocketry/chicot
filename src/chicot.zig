@@ -299,7 +299,7 @@ pub fn createModulesAndLibs(
 
     const writeStep = b.addWriteFiles();
     const emptyFile = writeStep.add(
-        "headerrooturmom.zig",
+        "headerroot.zig",
         "pub fn donotusethisfunction() void {}",
     );
 
