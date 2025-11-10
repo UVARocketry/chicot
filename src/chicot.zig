@@ -319,7 +319,7 @@ pub fn createModulesAndLibs(
             .stack_check = false,
             .stack_protector = false,
             .single_threaded = true,
-            // this is ABSOLUTELY NECESSARY, otherwise linking will fail
+            // this is ABSOLUTELY NECESSARY, otherwise linking will fail (i think)
             .unwind_tables = .none,
         } else .{
             .root_source_file = rootZig orelse emptyFile,

@@ -261,6 +261,123 @@ pub const JsonCommentDiscardReader = struct {
     }
 };
 
+pub fn addToJson(
+    arena: std.mem.Allocator,
+    modeInfo: anytype,
+    currentCppProps: []const u8,
+    cCppProps: []const u8,
+    pythonInc: []const u8,
+    mode: []const u8,
+    fileBuf: []u8,
+) !void {
+    const currentPropsFile = try std.fs.openFileAbsolute(currentCppProps, .{
+        .mode = .read_only,
+    });
+    defer currentPropsFile.close();
+    var buf: [512]u8 = undefined;
+    var r = currentPropsFile.reader(&buf);
+    const ior = &r.interface;
+    var jsonBuf: [512]u8 = undefined;
+    var jsonCommentReader: JsonCommentDiscardReader = .init(ior, &jsonBuf);
+    jsonCommentReader.debugAlloc = arena;
+
+    var jsonScanner: std.json.Scanner.Reader = .init(
+        arena,
+        &jsonCommentReader.interface,
+    );
+    defer jsonScanner.deinit();
+
+    // TODO: For invalid json files, just overwrite them
+    var v = try std.json.parseFromTokenSource(CppPropsJson, arena, &jsonScanner, .{});
+    defer v.deinit();
+
+    // 1 for src/
+    // 1 for Python.h
+    const includePathLen = 1 + 1 + modeInfo.cpp.include.len;
+
+    const include = try arena.alloc([]const u8, includePathLen);
+    include[0] = "src";
+    include[1] = pythonInc;
+
+    @memcpy(include[2..], modeInfo.cpp.include);
+
+    const cppstd = blk: {
+        for (modeInfo.cpp.otherFlags) |f| {
+            const stdflag = "-std=";
+            if (std.mem.startsWith(u8, f, stdflag)) {
+                break :blk f[stdflag.len..];
+            }
+        }
+        break :blk "c++11";
+    };
+
+    var defines: std.ArrayList([]const u8) = .{};
+    defer defines.deinit(arena);
+
+    if (modeInfo.cpp.define) |d| {
+        var iter = d.map.iterator();
+
+        while (iter.next()) |k| {
+            if (k.value_ptr.*) |value| {
+                if (value.len == 0) {
+                    try defines.append(arena, k.key_ptr.*);
+                } else {
+                    try defines.append(
+                        arena,
+                        try std.fmt.allocPrint(
+                            arena,
+                            "{s}={s}",
+                            .{ k.key_ptr.*, value },
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    const config: CppPropsJson.Configuration = .{
+        .name = mode,
+        .includePath = include,
+        .defines = defines.items,
+        .cppStandard = cppstd,
+        .compilerArgs = modeInfo.cpp.otherFlags,
+        .compilerPath = "clang",
+        .browse = .{
+            .limitSymbolsToIncludedHeaders = false,
+            .path = include,
+        },
+    };
+
+    if (v.value.configurations.len == 0) {
+        var configBuf: [1]CppPropsJson.Configuration = .{config};
+        v.value.configurations = &configBuf;
+    } else {
+        // TODO: check if there is already a config slot that contains
+        // data for this mode and overwrite it if so
+
+        for (v.value.configurations, 0..) |conf, i| {
+            if (std.mem.eql(u8, conf.name, config.name)) {
+                v.value.configurations[i] = conf;
+                break;
+            }
+        } else {
+            const newMem = try arena.alloc(CppPropsJson.Configuration, v.value.configurations.len + 1);
+            newMem[0] = config;
+            @memcpy(newMem[1..], v.value.configurations);
+            v.value.configurations = newMem;
+        }
+    }
+
+    const cppPropsFile = try std.fs.createFileAbsolute(cCppProps, .{ .truncate = true });
+    defer cppPropsFile.close();
+    var cppPropsWriter = cppPropsFile.writer(fileBuf);
+    const cpppropsiow = &cppPropsWriter.interface;
+
+    try std.json.fmt(v.value, .{}).format(cpppropsiow);
+
+    try cpppropsiow.flush();
+}
+
 pub fn main() !void {
     const allocator = std.heap.smp_allocator;
     var zonParseArena: std.heap.ArenaAllocator = .init(allocator);
@@ -360,30 +477,16 @@ pub fn main() !void {
         try cflagsiow.flush();
     }
 
-    {
-        const currentPropsFile = try std.fs.openFileAbsolute(currentCppProps, .{
-            .mode = .read_only,
-        });
-        defer currentPropsFile.close();
-        var buf: [512]u8 = undefined;
-        var r = currentPropsFile.reader(&buf);
-        const ior = &r.interface;
-        var jsonBuf: [512]u8 = undefined;
-        var jsonCommentReader: JsonCommentDiscardReader = .init(ior, &jsonBuf);
-        jsonCommentReader.debugAlloc = arena;
-
-        var jsonScanner: std.json.Scanner.Reader = .init(
-            arena,
-            &jsonCommentReader.interface,
-        );
-        defer jsonScanner.deinit();
-
-        // TODO: For invalid json files, just overwrite them
-        var v = try std.json.parseFromTokenSource(CppPropsJson, arena, &jsonScanner, .{});
-        defer v.deinit();
-
-        // 1 for src/
-        // 1 for Python.h
+    if (addToJson(
+        arena,
+        modeInfo,
+        currentCppProps,
+        cCppProps,
+        pythonInc,
+        mode,
+        &fileBuf,
+    )) {} else |_| {
+        std.debug.print("Creating ykyk\n", .{});
         const includePathLen = 1 + 1 + modeInfo.cpp.include.len;
 
         const include = try arena.alloc([]const u8, includePathLen);
@@ -439,32 +542,18 @@ pub fn main() !void {
             },
         };
 
-        if (v.value.configurations.len == 0) {
-            var configBuf: [1]CppPropsJson.Configuration = .{config};
-            v.value.configurations = &configBuf;
-        } else {
-            // TODO: check if there is already a config slot that contains
-            // data for this mode and overwrite it if so
+        var value: CppPropsJson = undefined;
 
-            for (v.value.configurations, 0..) |conf, i| {
-                if (std.mem.eql(u8, conf.name, config.name)) {
-                    v.value.configurations[i] = conf;
-                    break;
-                }
-            } else {
-                const newMem = try arena.alloc(CppPropsJson.Configuration, v.value.configurations.len + 1);
-                newMem[0] = config;
-                @memcpy(newMem[1..], v.value.configurations);
-                v.value.configurations = newMem;
-            }
-        }
+        var configBuf: [1]CppPropsJson.Configuration = .{config};
+        value.configurations = &configBuf;
+        value.version = 4;
 
         const cppPropsFile = try std.fs.createFileAbsolute(cCppProps, .{ .truncate = true });
         defer cppPropsFile.close();
         var cppPropsWriter = cppPropsFile.writer(&fileBuf);
         const cpppropsiow = &cppPropsWriter.interface;
 
-        try std.json.fmt(v.value, .{}).format(cpppropsiow);
+        try std.json.fmt(value, .{}).format(cpppropsiow);
 
         try cpppropsiow.flush();
     }
