@@ -267,6 +267,7 @@ pub fn getPythonInfo(b: *std.Build, pythonExe: ?[]const u8) PythonInfo {
 
 pub const Modules = struct {
     libzig: *std.Build.Step.Compile,
+    libzigActual: *std.Build.Step.Compile,
     libzigMod: *std.Build.Module,
     zigobject: *std.Build.Step.Compile,
     compatHeadersDir: []const u8,
@@ -298,7 +299,7 @@ pub fn createModulesAndLibs(
 
     const writeStep = b.addWriteFiles();
     const emptyFile = writeStep.add(
-        "headerroot.zig",
+        "headerrooturmom.zig",
         "pub fn donotusethisfunction() void {}",
     );
 
@@ -306,11 +307,27 @@ pub fn createModulesAndLibs(
     const optimize = resolvedInfo.optimize;
     const cppInfo = resolvedInfo.buildInfo.cpp;
 
-    const libzigMod = b.addModule("libzig", .{
-        .root_source_file = rootZig orelse emptyFile,
-        .target = target,
-        .optimize = optimize,
-    });
+    const libzigMod = blk: {
+        const info: std.Build.Module.CreateOptions = if (resolvedInfo.buildType == .teensy41) .{
+            .root_source_file = rootZig orelse emptyFile,
+            .target = target,
+            .optimize = optimize,
+            // these all shrink down the exe size
+            .error_tracing = false,
+            .omit_frame_pointer = true,
+            // .strip = true,
+            .stack_check = false,
+            .stack_protector = false,
+            .single_threaded = true,
+            // this is ABSOLUTELY NECESSARY, otherwise linking will fail
+            .unwind_tables = .none,
+        } else .{
+            .root_source_file = rootZig orelse emptyFile,
+            .target = target,
+            .optimize = optimize,
+        };
+        break :blk b.addModule("libzig", info);
+    };
 
     const rootMod = b.addModule("root", .{
         .target = target,
@@ -363,20 +380,25 @@ pub fn createModulesAndLibs(
     });
 
     const libzigActual = b.addLibrary(.{
-        .name = "zig",
+        .name = "zigForThisDep",
         .linkage = .static,
         .root_module = libzigMod,
     });
 
-    // libzig.link_gc_sections = false;
+    const zigObj = b.addObject(.{
+        .name = "zigobject",
+        .root_module = libzigMod,
+    });
 
     const libzig = b.addLibrary(.{
-        .name = "zigactual",
+        .name = "zig",
         .linkage = .static,
         .root_module = emptyMod,
     });
+    libzig.link_gc_sections = false;
 
-    libzig.linkLibrary(libzigActual);
+    std.debug.print("Linking in main lib!\n", .{});
+    libzig.addObject(zigObj);
 
     const headerLib = b.addLibrary(.{
         .name = "headers",
@@ -399,11 +421,6 @@ pub fn createModulesAndLibs(
     });
     lib.linkLibCpp();
 
-    const zigobject = b.addObject(.{
-        .name = "zigobject",
-        .root_module = libzigMod,
-    });
-
     const python = if (pythonMod) |mod| blk: {
         const python = b.addLibrary(.{
             .name = "python",
@@ -422,6 +439,7 @@ pub fn createModulesAndLibs(
             .root_module = mod,
         });
         exe.linkLibCpp();
+        exe.linkLibrary(libzig);
         break :blk exe;
     } else null;
 
@@ -445,8 +463,8 @@ pub fn createModulesAndLibs(
 
         const mainMod = dep.module("root");
         const depLibZigMod = dep.module("libzig");
-        const depLibZig = dep.artifact("zigactual");
-        // const depLibZigObj = dep.artifact("zigobject");
+        // const depLibZig = dep.artifact("zig");
+        const depLibZigObj = dep.namedLazyPath("zigobject");
         const headers = dep.artifact("headers");
 
         rootMod.addImport(depInfo.importName orelse depInfo.dependencyName, mainMod);
@@ -464,10 +482,11 @@ pub fn createModulesAndLibs(
             depLibZigMod,
         );
         std.debug.print("Adding object and stuff for {s}!\n", .{depInfo.dependencyName});
-        libzig.linkLibrary(depLibZig);
+        libzig.addObjectFile(depLibZigObj);
     }
     return .{
         .libzig = libzig,
+        .libzigActual = libzigActual,
         .compatHeadersDir = compatHeadersDir,
         .depHeadersDir = depHeadersDir,
         .platformioClangdCompatHeaders = chicot.artifact(compatHeadersDir),
@@ -480,7 +499,7 @@ pub fn createModulesAndLibs(
         .exeMod = exeMod,
         .rootMod = rootMod,
         .libzigMod = libzigMod,
-        .zigobject = zigobject,
+        .zigobject = zigObj,
     };
 }
 
@@ -792,7 +811,10 @@ pub fn build(
     )) {
         std.debug.print("Installing libzig!\n", .{});
         b.installArtifact(modules.libzig);
+        b.addNamedLazyPath("zigobject", modules.zigobject.getEmittedBin());
         check.dependOn(&modules.libzig.step);
+        b.installArtifact(modules.libzigActual);
+        check.dependOn(&modules.libzigActual.step);
         // b.installArtifact(modules.zigobject);
         // check.dependOn(&modules.zigobject.step);
     }
