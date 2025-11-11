@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 const zonParse = @import("helpers/parseZon.zig");
+const steps = @import("./steps.zig");
 const buildInfo = @import("helpers/buildInfo.zig");
 const inherit = @import("helpers/inherit.zig");
 
@@ -15,228 +16,6 @@ pub const version = "0.0.0";
 pub const mainDir = "src";
 pub const desktopDir = "desktop";
 pub const pyDir = "python";
-
-pub fn getFileContents(
-    dir: std.fs.Dir,
-    name: []const u8,
-    alloc: std.mem.Allocator,
-    maxLen: usize,
-) ![]const u8 {
-    var buf = try alloc.alloc(u8, maxLen);
-    errdefer alloc.free(buf);
-    const file = try dir.openFile(name, .{});
-    var reader = file.reader(&.{});
-    const len = try reader.interface.readSliceShort(buf);
-    if (len < buf.len) {
-        if (alloc.resize(buf, len)) {
-            buf = buf[0..len];
-        } else {
-            const newBuf = try alloc.alloc(u8, len);
-            @memcpy(newBuf, buf[0..len]);
-            alloc.free(buf);
-            buf = newBuf;
-        }
-    }
-    return buf;
-}
-
-pub fn addLibraryJsonStep(
-    b: *std.Build,
-    chicot: *std.Build.Dependency,
-    helpers: *std.Build.Module,
-) !void {
-    const libraryJsonMod = b.addModule("libraryJson", .{
-        .root_source_file = chicot.path("src/helpers/generators/libraryJson.zig"),
-        .optimize = .Debug,
-        .target = b.graph.host,
-    });
-    libraryJsonMod.addImport("helpers", helpers);
-    libraryJsonMod.addAnonymousImport("zon", .{
-        .root_source_file = b.path("build.zig.zon"),
-    });
-
-    const libraryJsonProg = b.addExecutable(.{
-        .name = "pioini",
-        .root_module = libraryJsonMod,
-    });
-
-    // b.installArtifact(pioIniProgram);
-    const runLibraryJson = b.addRunArtifact(libraryJsonProg);
-
-    const libraryJsonOut = runLibraryJson.addOutputFileArg("library.json");
-
-    const installLibraryJson = b.addInstallFile(libraryJsonOut, "library.json");
-
-    const libraryJsonStep = b.step("libraryjson", "generate the library.json for platformio to be able to use this repo as a dependency");
-    libraryJsonStep.dependOn(&installLibraryJson.step);
-}
-
-pub fn addPioLspStep(
-    b: *std.Build,
-    helpers: *std.Build.Module,
-    chicot: *std.Build.Dependency,
-    pioProgramName: []const u8,
-    mode: []const u8,
-    depHeadersDir: []const u8,
-) !void {
-    const pioLspModule = b.createModule(.{
-        .root_source_file = chicot.path("src/helpers/generators/pioLspInfo.zig"),
-        .optimize = .Debug,
-        .target = b.graph.host,
-    });
-    pioLspModule.addImport("helpers", helpers);
-    pioLspModule.addAnonymousImport("zon", .{
-        .root_source_file = b.path("build.zig.zon"),
-    });
-
-    const pioLspProgram = b.addExecutable(.{
-        .name = "piolsp",
-        .root_module = pioLspModule,
-    });
-
-    // b.installArtifact(pioIniProgram);
-    const runPioLsp = b.addRunArtifact(pioLspProgram);
-
-    runPioLsp.addArg(pioProgramName);
-    runPioLsp.addArg(mode);
-    runPioLsp.addArg(compatHeadersDir);
-    runPioLsp.addArg(depHeadersDir);
-    // runPioLsp.addFileArg(pioRoot);
-    // runPioLsp.addFileArg(writeStep.add("main.cpp", "int main(){}\n\n"));
-    const outputCompFlags = runPioLsp.addOutputFileArg("compile_flags.txt");
-    // const outputCompCommands = runPioLsp.addOutputFileArg("compile_commands.json");
-    // const outputCppProps = runPioLsp.addOutputFileArg(".vscode/c_cpp_properties.json");
-
-    const installCompFlags = b.addInstallFile(outputCompFlags, "compile_flags.txt");
-    // const installCompCommands = b.addInstallFile(outputCompCommands, "compile_commands.json");
-    // const installCppProps = b.addInstallFile(outputCppProps, ".vscode/c_cpp_properties.json");
-
-    b.installArtifact(pioLspProgram);
-
-    const lsp = b.step("piolsp", "generate the necessary info for your lsp to work");
-    lsp.dependOn(&installCompFlags.step);
-    // lsp.dependOn(&platformioClangdCompatHeaders.step);
-    // lsp.dependOn(&installCompCommands.step);
-    // lsp.dependOn(&installCppProps.step);
-}
-
-pub fn addDesktopLspStep(
-    b: *std.Build,
-    helpers: *std.Build.Module,
-    chicot: *std.Build.Dependency,
-    pioProgramName: []const u8,
-    mode: []const u8,
-    pythonInc: []const u8,
-    depHeadersDir: []const u8,
-    platformioClangdCompatHeaders: *std.Build.Step.Compile,
-) !void {
-    const lspModule = b.createModule(.{
-        .root_source_file = chicot.path("src/helpers/generators/desktopLspInfo.zig"),
-        .optimize = .Debug,
-        .target = b.graph.host,
-    });
-    lspModule.addImport("helpers", helpers);
-    lspModule.addAnonymousImport("zon", .{
-        .root_source_file = b.path("build.zig.zon"),
-    });
-
-    const lspProgram = b.addExecutable(.{
-        .name = "lsp",
-        .root_module = lspModule,
-    });
-
-    // b.installArtifact(pioIniProgram);
-    const runLsp = b.addRunArtifact(lspProgram);
-
-    // keep this in here just in case we merge pioLspInfo and desktopLspInfo
-    runLsp.addArg(pioProgramName);
-    runLsp.addArg(mode);
-    runLsp.addArg(pythonInc);
-    runLsp.addArg(depHeadersDir);
-    // TODO: pass the os we are building for so that it can inherit desktop_{os}
-    // info properly
-
-    // keep this in here just in case we merge pioLspInfo and desktopLspInfo
-    runLsp.addDirectoryArg(platformioClangdCompatHeaders.getEmittedIncludeTree());
-    const outputCompFlags = runLsp.addOutputFileArg("compile_flags.txt");
-    const outputCppProps = runLsp.addOutputFileArg(".vscode/c_cpp_properties.json");
-    // TODO: detect missing cppprops, and replace with empty thing
-    runLsp.addFileArg(b.path(".vscode/c_cpp_properties.json"));
-
-    const installCompFlags = b.addInstallFile(outputCompFlags, "compile_flags.txt");
-    const installCppProps = b.addInstallFile(
-        outputCppProps,
-        ".vscode/c_cpp_properties.json",
-    );
-
-    b.installArtifact(lspProgram);
-
-    const lsp = b.step("lsp", "generate the necessary info for your lsp to work");
-    lsp.dependOn(&installCompFlags.step);
-    lsp.dependOn(&installCppProps.step);
-}
-
-pub fn addPlatformioIniStep(
-    b: *std.Build,
-    helpers: *std.Build.Module,
-    chicot: *std.Build.Dependency,
-    pioDiffMode: bool,
-    allocator: std.mem.Allocator,
-) !void {
-    const pioIniModule = b.addModule("pioIni", .{
-        .root_source_file = chicot.path("src/helpers/generators/platformIoIni.zig"),
-        .optimize = .Debug,
-        .target = b.graph.host,
-    });
-    pioIniModule.addImport("helpers", helpers);
-    const options = b.addOptions();
-    options.addOption([]const u8, "zonFile", "build.zig.zon");
-    pioIniModule.addOptions("config", options);
-    pioIniModule.addAnonymousImport("zon", .{
-        .root_source_file = b.path("build.zig.zon"),
-    });
-
-    const pioIniProgram = b.addExecutable(.{
-        .name = "pioini",
-        .root_module = pioIniModule,
-    });
-
-    const runPioIni = b.addRunArtifact(pioIniProgram);
-
-    const output = runPioIni.addOutputFileArg("platformio.ini");
-    const outputCheckPioPy = runPioIni.addOutputFileArg("checkpio.py");
-    if (pioDiffMode) {
-        const pioIniContents = try getFileContents(
-            std.fs.cwd(),
-            "platformio.ini",
-            allocator,
-            40000,
-        );
-        defer allocator.free(pioIniContents);
-        runPioIni.addArg(pioIniContents);
-
-        const checkpioContents = try getFileContents(
-            std.fs.cwd(),
-            "checkpio.py",
-            allocator,
-            40000,
-        );
-        defer allocator.free(checkpioContents);
-        runPioIni.addArg(checkpioContents);
-    } else {
-        runPioIni.addArg("");
-        runPioIni.addArg("");
-    }
-
-    const installPioIni = b.addInstallFile(output, "platformio.ini");
-    const installPioCheckPy = b.addInstallFile(outputCheckPioPy, "checkpio.py");
-
-    // b.getInstallStep().dependOn(&installPioIni.step);
-
-    const pioIni = b.step("pio", "generate the platformio.ini file");
-    pioIni.dependOn(&installPioIni.step);
-    pioIni.dependOn(&installPioCheckPy.step);
-}
 
 pub const PythonInfo = struct {
     include: []const u8,
@@ -267,13 +46,12 @@ pub fn getPythonInfo(b: *std.Build, pythonExe: ?[]const u8) PythonInfo {
 
 pub const Modules = struct {
     libzig: *std.Build.Step.Compile,
-    libzigActual: *std.Build.Step.Compile,
     libzigMod: *std.Build.Module,
     zigobject: *std.Build.Step.Compile,
     compatHeadersDir: []const u8,
     depHeadersDir: []const u8,
     platformioClangdCompatHeaders: *std.Build.Step.Compile,
-    rootMod: ?*std.Build.Module,
+    // rootMod: ?*std.Build.Module,
     lib: *std.Build.Step.Compile,
     headerLib: *std.Build.Step.Compile,
     depHeaderLib: *std.Build.Step.Compile,
@@ -326,19 +104,28 @@ pub fn createModulesAndLibs(
             .target = target,
             .optimize = optimize,
         };
-        break :blk b.addModule("libzig", info);
+        break :blk b.addModule(projectName, info);
     };
+
+    const rootSrcDirs: [2][]const u8 = .{ rootDir, mainDir };
 
     const rootMod = b.addModule("root", .{
         .target = target,
         .optimize = optimize,
-        .root_source_file = rootZig,
+        .root_source_file = emptyFile,
     });
-    const rootSrcDirs: [2][]const u8 = .{ rootDir, mainDir };
     try addCppFiles(b, rootMod, b.pathJoin(&rootSrcDirs), cppInfo.otherFlags);
     resolveCppInfo(b, rootMod, cppInfo);
 
-    const pythonMod = if (dirExists(pyDir)) blk: {
+    // TODO: add libcpp so that parent dependencies can use cpp stuff from child
+    // dependencies. then prolly js add it as a namedLazyPath
+    // const libCpp = b.addLibrary(.{
+    //     .name = "cpp",
+    //     .linkage = .static,
+    //     .root_module = rootMod,
+    // });
+
+    const pythonMod = if (dirExists(b, pyDir)) blk: {
         const pythonMod = b.addModule("python", .{
             .root_source_file = pyrootZig,
             .target = target,
@@ -355,13 +142,12 @@ pub fn createModulesAndLibs(
         break :blk pythonMod;
     } else null;
 
-    const exeMod = if (dirExists(desktopDir)) blk: {
+    const exeMod = if (dirExists(b, desktopDir)) blk: {
         const exeMod = b.addModule("main", .{
             .root_source_file = desktopZig,
             .target = target,
             .optimize = optimize,
         });
-        exeMod.addImport(projectName, libzigMod);
         exeMod.addIncludePath(b.path(b.pathJoin(&rootSrcDirs)));
         const rootDesktopDirs: [2][]const u8 = .{ rootDir, desktopDir };
         try addCppFiles(b, exeMod, b.pathJoin(&rootDesktopDirs), cppInfo.otherFlags);
@@ -379,26 +165,17 @@ pub fn createModulesAndLibs(
         .root_source_file = emptyFile,
     });
 
-    const libzigActual = b.addLibrary(.{
-        .name = "zigForThisDep",
-        .linkage = .static,
-        .root_module = libzigMod,
-    });
-
     const zigObj = b.addObject(.{
-        .name = "zigobject",
+        .name = "zig",
         .root_module = libzigMod,
     });
 
     const libzig = b.addLibrary(.{
         .name = "zig",
         .linkage = .static,
-        .root_module = emptyMod,
+        .root_module = libzigMod,
     });
     libzig.link_gc_sections = false;
-
-    std.debug.print("Linking in main lib!\n", .{});
-    libzig.addObject(zigObj);
 
     const headerLib = b.addLibrary(.{
         .name = "headers",
@@ -417,7 +194,7 @@ pub fn createModulesAndLibs(
     const lib = b.addLibrary(.{
         .name = projectName,
         .linkage = .static,
-        .root_module = rootMod,
+        .root_module = libzigMod,
     });
     lib.linkLibCpp();
 
@@ -461,32 +238,34 @@ pub fn createModulesAndLibs(
             .optimize = optimize,
         });
 
-        const mainMod = dep.module("root");
-        const depLibZigMod = dep.module("libzig");
-        // const depLibZig = dep.artifact("zig");
-        const depLibZigObj = dep.namedLazyPath("zigobject");
+        const depLibZigMod = dep.module(depInfo.dependencyName);
+        const depLibZigObj = dep.namedLazyPath("obj/zig.o");
         const headers = dep.artifact("headers");
 
-        rootMod.addImport(depInfo.importName orelse depInfo.dependencyName, mainMod);
+        const headersTree = headers.getEmittedIncludeTree();
+
+        // rootMod.addImport(depInfo.importName orelse depInfo.dependencyName, mainMod);
+        // rootMod.addIncludePath(headersTree);
         if (pythonMod) |mod| {
-            mod.addImport(depInfo.importName orelse depInfo.dependencyName, mainMod);
+            mod.addImport(depInfo.importName orelse depInfo.dependencyName, depLibZigMod);
+            mod.addIncludePath(headersTree);
         }
 
         if (exeMod) |mod| {
-            mod.addImport(depInfo.importName orelse depInfo.dependencyName, mainMod);
+            // mod.addImport(depInfo.importName orelse depInfo.dependencyName, depLibZigMod);
+            mod.addIncludePath(headersTree);
         }
-        depHeaderLib.installHeadersDirectory(headers.getEmittedIncludeTree(), depHeadersDir, .{});
+        depHeaderLib.installHeadersDirectory(headersTree, depHeadersDir, .{});
 
         libzigMod.addImport(
             depInfo.importName orelse depInfo.dependencyName,
             depLibZigMod,
         );
-        std.debug.print("Adding object and stuff for {s}!\n", .{depInfo.dependencyName});
+        // std.debug.print("Adding object and stuff for {s}!\n", .{depInfo.dependencyName});
         libzig.addObjectFile(depLibZigObj);
     }
     return .{
         .libzig = libzig,
-        .libzigActual = libzigActual,
         .compatHeadersDir = compatHeadersDir,
         .depHeadersDir = depHeadersDir,
         .platformioClangdCompatHeaders = chicot.artifact(compatHeadersDir),
@@ -497,7 +276,7 @@ pub fn createModulesAndLibs(
         .exe = exe,
         .pythonMod = pythonMod,
         .exeMod = exeMod,
-        .rootMod = rootMod,
+        // .rootMod = rootMod,
         .libzigMod = libzigMod,
         .zigobject = zigObj,
     };
@@ -656,9 +435,6 @@ pub fn resolveBuildInformation(b: *std.Build, zon: anytype) !FullBuildInfo {
         defer mergedFlags.deinit(b.allocator);
         try mergedFlags.appendSlice(b.allocator, parentFlags.?);
         try mergedFlags.appendSlice(b.allocator, rootFlags.?);
-        for (mergedFlags.items) |merged| {
-            std.debug.print("  - {s}\n", .{merged});
-        }
         modeInfo.cpp.addFlags(b.allocator, mergedFlags.items, &diagnostic) catch |e| {
             if (diagnostic) |d| {
                 std.debug.print("Referenced flags: {s}\n", .{d});
@@ -667,26 +443,26 @@ pub fn resolveBuildInformation(b: *std.Build, zon: anytype) !FullBuildInfo {
         };
     }
 
-    std.debug.print("cpp info: \n", .{});
-    std.debug.print("  include: \n", .{});
-    for (modeInfo.cpp.include) |inc| {
-        std.debug.print("    - {s}\n", .{inc});
-    }
-    std.debug.print("  link:\n", .{});
-    for (modeInfo.cpp.linkPath) |link| {
-        std.debug.print("    - {s}\n", .{link});
-    }
-    std.debug.print("  flags:\n", .{});
-    for (modeInfo.cpp.otherFlags) |flag| {
-        std.debug.print("    {s}\n", .{flag});
-    }
-    if (modeInfo.cpp.define) |d| {
-        var iter = d.map.iterator();
-        std.debug.print("  define:\n", .{});
-        while (iter.next()) |next| {
-            std.debug.print("    {s} = {s}\n", .{ next.key_ptr.*, next.value_ptr.* orelse "UNDEFINED" });
-        }
-    }
+    // std.debug.print("cpp info: \n", .{});
+    // std.debug.print("  include: \n", .{});
+    // for (modeInfo.cpp.include) |inc| {
+    //     std.debug.print("    - {s}\n", .{inc});
+    // }
+    // std.debug.print("  link:\n", .{});
+    // for (modeInfo.cpp.linkPath) |link| {
+    //     std.debug.print("    - {s}\n", .{link});
+    // }
+    // std.debug.print("  flags:\n", .{});
+    // for (modeInfo.cpp.otherFlags) |flag| {
+    //     std.debug.print("    {s}\n", .{flag});
+    // }
+    // if (modeInfo.cpp.define) |d| {
+    //     var iter = d.map.iterator();
+    //     std.debug.print("  define:\n", .{});
+    //     while (iter.next()) |next| {
+    //         std.debug.print("    {s} = {s}\n", .{ next.key_ptr.*, next.value_ptr.* orelse "UNDEFINED" });
+    //     }
+    // }
 
     const optimize = b.standardOptimizeOption(.{
         .preferred_optimize_mode = modeInfo.optimize,
@@ -711,6 +487,11 @@ pub fn build(
     options: BuildOptions,
 ) !Modules {
     _ = options;
+    const start = std.time.microTimestamp();
+    defer {
+        const end = std.time.microTimestamp();
+        std.debug.print("Resolution time: {}ms\n", .{@divFloor(end - start, 1000)});
+    }
     const projectName = @tagName(zon.name);
 
     const resolvedInfo = try resolveBuildInformation(b, zon);
@@ -755,24 +536,25 @@ pub fn build(
 
         // std.debug.print("searching at {s}!\n", .{expectedPioDir});
         const pio = try b.findProgram(&.{pioProgramName}, &.{expectedPioDir});
-        std.debug.print("found pio at {s}!\n", .{pio});
+        // std.debug.print("found pio at {s}!\n", .{pio});
         break :blk pio;
     };
 
     const helpers = chicot.module("helpers");
 
-    try addLibraryJsonStep(b, chicot, helpers);
+    try steps.addLibraryJsonStep(b, chicot, helpers);
 
-    try addPioLspStep(
+    try steps.addPioLspStep(
         b,
         helpers,
         chicot,
         pioProgramName,
         resolvedInfo.selectedMode,
         modules.depHeadersDir,
+        modules.compatHeadersDir,
     );
 
-    try addDesktopLspStep(
+    try steps.addDesktopLspStep(
         b,
         helpers,
         chicot,
@@ -783,7 +565,7 @@ pub fn build(
         modules.platformioClangdCompatHeaders,
     );
 
-    try addPlatformioIniStep(b, helpers, chicot, pioDiffMode, b.allocator);
+    try steps.addPlatformioIniStep(b, helpers, chicot, pioDiffMode, b.allocator);
 
     const check = b.step("check", "Check if foo compiles");
 
@@ -794,7 +576,7 @@ pub fn build(
         1,
         .liball,
     )) {
-        std.debug.print("Installing liball!\n", .{});
+        // std.debug.print("Installing liball!\n", .{});
         b.installArtifact(modules.lib);
         check.dependOn(&modules.lib.step);
     }
@@ -803,18 +585,16 @@ pub fn build(
     if (resolvedInfo.buildInfo.platformio != null) {
         b.installArtifact(modules.platformioClangdCompatHeaders);
     }
+    b.addNamedLazyPath("obj/zig.o", modules.zigobject.getEmittedBin());
     if (std.mem.containsAtLeastScalar(
         BuildInfo.OutputType,
         outputTypes,
         1,
         .libzig,
     )) {
-        std.debug.print("Installing libzig!\n", .{});
+        // std.debug.print("Installing libzig!\n", .{});
         b.installArtifact(modules.libzig);
-        b.addNamedLazyPath("zigobject", modules.zigobject.getEmittedBin());
         check.dependOn(&modules.libzig.step);
-        b.installArtifact(modules.libzigActual);
-        check.dependOn(&modules.libzigActual.step);
         // b.installArtifact(modules.zigobject);
         // check.dependOn(&modules.zigobject.step);
     }
@@ -824,10 +604,20 @@ pub fn build(
         1,
         .pythonmodule,
     )) {
-        std.debug.print("Installing py!\n", .{});
+        // std.debug.print("Installing py!\n", .{});
         if (modules.python) |py| {
             b.installArtifact(py);
             check.dependOn(&py.step);
+            const name =
+                try std.fmt.allocPrint(b.allocator, "python/lib{s}.so", .{projectName});
+            std.debug.print("Installing {s}\n", .{name});
+
+            const pyStep = b.step("py", "Installs the python module to the canonical location");
+            const step = b.addInstallFile(
+                py.getEmittedBin(),
+                name,
+            );
+            pyStep.dependOn(&step.step);
         } else {
             std.debug.print(
                 "zon file directs chicot to install pythonmodule, but no pythonmodule was created during the build process. Did you forget to use the {s}/ folder?\n",
@@ -841,7 +631,7 @@ pub fn build(
         1,
         .exe,
     )) {
-        std.debug.print("Installing exe!\n", .{});
+        // std.debug.print("Installing exe!\n", .{});
         if (modules.exe) |exe| {
             b.installArtifact(exe);
             check.dependOn(&exe.step);
@@ -905,7 +695,7 @@ pub fn addCppFiles(
     rootDir: []const u8,
     flags: []const []const u8,
 ) !void {
-    var dir = try std.fs.cwd().openDir(rootDir, .{ .iterate = true });
+    var dir = try b.build_root.handle.openDir(rootDir, .{ .iterate = true });
     defer dir.close();
 
     var iter = dir.iterate();
@@ -925,8 +715,8 @@ pub fn addCppFiles(
         }
     }
 }
-pub fn dirExists(path: []const u8) bool {
-    var dir = std.fs.cwd().openDir(path, .{}) catch return false;
+pub fn dirExists(b: *std.Build, path: []const u8) bool {
+    var dir = b.build_root.handle.openDir(path, .{}) catch return false;
     defer dir.close();
     return true;
 }
@@ -936,7 +726,7 @@ pub fn fileExists(
     subDir: []const u8,
     path: []const u8,
 ) ?std.Build.LazyPath {
-    var dir = std.fs.cwd().openDir(subDir, .{}) catch return null;
+    var dir = b.build_root.handle.openDir(subDir, .{}) catch return null;
     defer dir.close();
     dir.access(path, .{}) catch return null;
     const array: [2][]const u8 = .{ subDir, path };
