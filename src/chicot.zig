@@ -128,12 +128,15 @@ pub fn createModulesAndLibs(
         "headerroot.zig",
         "pub fn donotusethisfunction() void {}",
     );
+
+    // An empty module to replace some modules lowkey
     const emptyMod = b.createModule(.{
         .target = target,
         .optimize = optimize,
         .root_source_file = emptyFile,
     });
 
+    // The module from root.zig
     const libzigMod = blk: {
         const info: std.Build.Module.CreateOptions = if (resolvedInfo.buildType == .teensy41) .{
             .root_source_file = rootZig orelse emptyFile,
@@ -158,6 +161,7 @@ pub fn createModulesAndLibs(
 
     const rootSrcDirs: [2][]const u8 = .{ rootDir, mainDir };
 
+    // The module that contains all cpp files inside src/
     const cppMod = b.addModule("root", .{
         .target = target,
         .optimize = optimize,
@@ -169,6 +173,7 @@ pub fn createModulesAndLibs(
         resolveCppInfo(b, libzigMod, cppInfo);
     }
 
+    // A library that links in all the libcpp's from sub dependencies
     const libCppForDeps = b.addLibrary(.{
         .name = "cpp",
         .linkage = .static,
@@ -176,6 +181,7 @@ pub fn createModulesAndLibs(
     });
     libCppForDeps.linkLibCpp();
 
+    // A library that contains this library's libcpp and links all dependency libcpp's
     const actualLibCpp = b.addLibrary(.{
         .name = "cpp",
         .linkage = .static,
@@ -184,6 +190,8 @@ pub fn createModulesAndLibs(
     actualLibCpp.linkLibCpp();
     actualLibCpp.linkLibrary(libCppForDeps);
 
+    // A module that contains the python/* and also compiles python/python.zig if
+    // it exists
     const pythonMod = if (dirExists(b, pyDir) and resolvedInfo.buildEverything) blk: {
         const pythonMod = b.addModule("python", .{
             .root_source_file = pyrootZig,
@@ -203,6 +211,8 @@ pub fn createModulesAndLibs(
         break :blk pythonMod;
     } else null;
 
+    // A module that contains the desktop/* and also compiles desktop/main.zig if
+    // it exists
     const exeMod = if (dirExists(b, desktopDir) and resolvedInfo.buildEverything) blk: {
         const exeMod = b.addModule("main", .{
             .root_source_file = desktopZig,
@@ -220,14 +230,14 @@ pub fn createModulesAndLibs(
         break :blk exeMod;
     } else null;
 
-    // const path = writeStep.add("asdg", "ooga");
-    // path.addStepDependencies(other_step: *Step)
-
+    // An object that builds libzigMod if it exists
     const zigObj = b.addObject(.{
         .name = "zig",
         .root_module = libzigMod,
     });
 
+    // A library that builds this zigobj AND all dep zigobj's
+    // into one library
     const libzig = b.addLibrary(.{
         .name = "zig",
         .linkage = .static,
@@ -236,6 +246,7 @@ pub fn createModulesAndLibs(
     libzig.link_gc_sections = false;
     libzig.addIncludePath(b.path("src"));
 
+    // A lib for this lib's headers to be installed
     const headerLib = b.addLibrary(.{
         .name = "headers",
         .linkage = .static,
@@ -247,6 +258,7 @@ pub fn createModulesAndLibs(
         recursivelyAddHeaderDirs(b, headerLib, installDir.fromDir, installDir.toDir);
     }
 
+    // a lib for all dep's headers to be installed
     const depHeadersDir = "depheaders";
     const depHeaderLib = b.addLibrary(.{
         .name = depHeadersDir,
@@ -267,6 +279,7 @@ pub fn createModulesAndLibs(
     });
     lib.linkLibCpp();
 
+    // the python library
     const python = if (pythonMod) |mod| blk: {
         const python = b.addLibrary(.{
             .name = "python",
@@ -280,6 +293,7 @@ pub fn createModulesAndLibs(
         break :blk python;
     } else null;
 
+    // the exe
     const exe = if (exeMod) |mod| blk: {
         const exe = b.addExecutable(.{
             .name = projectName,
@@ -304,7 +318,7 @@ pub fn createModulesAndLibs(
             rootFlags = resolvedInfo.currentFlags;
             parentFlags = &.{};
         }
-        std.debug.print("Loading dep {s} for {s}\n", .{ depInfo.dependencyName, projectName });
+        // std.debug.print("Loading dep {s} for {s}\n", .{ depInfo.dependencyName, projectName });
         const dep = b.dependency(depInfo.dependencyName, .{
             .mode = @tagName(resolvedInfo.buildType),
             .__flagsFromRoot = rootFlags,
@@ -314,7 +328,6 @@ pub fn createModulesAndLibs(
             .target = target,
             .optimize = optimize,
         });
-        std.debug.print("Done loading dep {s} for {s}\n", .{ depInfo.dependencyName, projectName });
 
         const depLibZigMod = dep.module(depInfo.dependencyName);
         const depLibCpp =
@@ -328,8 +341,6 @@ pub fn createModulesAndLibs(
         actualLibCpp.addIncludePath(headersTree);
         cppMod.addIncludePath(headersTree);
 
-        // rootMod.addImport(depInfo.importName orelse depInfo.dependencyName, mainMod);
-        // rootMod.addIncludePath(headersTree);
         if (pythonMod) |mod| {
             mod.addImport(depInfo.importName orelse depInfo.dependencyName, depLibZigMod);
             mod.addIncludePath(headersTree);
@@ -809,9 +820,17 @@ pub fn build(
         if (modules.python) |py| {
             b.installArtifact(py);
             check.dependOn(&py.step);
-            const name =
-                try std.fmt.allocPrint(b.allocator, "python/lib{s}.so", .{projectName});
-            std.debug.print("Installing {s}\n", .{name});
+            const soExtension = if (builtin.os.tag == .windows)
+                "pyd"
+            else
+                "so";
+
+            const name = try std.fmt.allocPrint(
+                b.allocator,
+                "python/{s}.{s}",
+                .{ projectName, soExtension },
+            );
+            // std.debug.print("Installing {s}\n", .{name});
 
             const pyStep = b.step("py", "Installs the python module to the canonical location");
             const step = b.addInstallFile(
@@ -820,10 +839,10 @@ pub fn build(
             );
             pyStep.dependOn(&step.step);
         } else {
-            // std.debug.print(
-            //     "zon file directs chicot to install pythonmodule, but no pythonmodule was created during the build process. Did you forget to use the {s}/ folder?\n",
-            //     .{pyDir},
-            // );
+            std.debug.print(
+                "zon file directs chicot to install pythonmodule, but no pythonmodule was created during the build process. Did you forget to use the {s}/ folder?\n",
+                .{pyDir},
+            );
         }
     }
     if (std.mem.containsAtLeastScalar(
@@ -837,10 +856,10 @@ pub fn build(
             b.installArtifact(exe);
             check.dependOn(&exe.step);
         } else {
-            // std.debug.print(
-            //     "zon file directs chicot to install an exe, but no exe was created during the build process. Did you forget to use the {s}/ folder?\n",
-            //     .{desktopDir},
-            // );
+            std.debug.print(
+                "zon file directs chicot to install an exe, but no exe was created during the build process. Did you forget to use the {s}/ folder?\n",
+                .{desktopDir},
+            );
         }
     }
 
