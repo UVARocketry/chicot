@@ -254,6 +254,12 @@ pub fn createModulesAndLibs(
         .root_module = emptyMod,
     });
 
+    // this makes it so that gd on an @cInclude on a c header path inside the current
+    // project jumps to a file inside the current project *NOT* somewhere in the cache
+    libzigMod.addIncludePath(headerLib.getEmittedIncludeTree());
+    // make sure zig files can see dependency headers
+    libzigMod.addIncludePath(depHeaderLib.getEmittedIncludeTree());
+
     const lib = b.addLibrary(.{
         .name = projectName,
         .linkage = .static,
