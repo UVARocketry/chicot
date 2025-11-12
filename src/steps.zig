@@ -97,7 +97,7 @@ pub fn addPioLspStep(
 
     b.installArtifact(pioLspProgram);
 
-    const lsp = b.step("piolsp", "generate the necessary info for your lsp to work");
+    const lsp = b.step("lsp", "generate the necessary info for your lsp to work");
     lsp.dependOn(&installCompFlags.step);
     // lsp.dependOn(&platformioClangdCompatHeaders.step);
     // lsp.dependOn(&installCompCommands.step);
@@ -143,21 +143,21 @@ pub fn addDesktopLspStep(
     // keep this in here just in case we merge pioLspInfo and desktopLspInfo
     runLsp.addDirectoryArg(platformioClangdCompatHeaders.getEmittedIncludeTree());
     const outputCompFlags = runLsp.addOutputFileArg("compile_flags.txt");
-    const outputCppProps = runLsp.addOutputFileArg(".vscode/c_cpp_properties.json");
+    // const outputCppProps = runLsp.addOutputFileArg(".vscode/c_cpp_properties.json");
     // TODO: detect missing cppprops, and replace with empty thing
-    runLsp.addFileArg(b.path(".vscode/c_cpp_properties.json"));
+    // runLsp.addFileArg(b.path(".vscode/c_cpp_properties.json"));
 
     const installCompFlags = b.addInstallFile(outputCompFlags, "compile_flags.txt");
-    const installCppProps = b.addInstallFile(
-        outputCppProps,
-        ".vscode/c_cpp_properties.json",
-    );
+    // const installCppProps = b.addInstallFile(
+    //     outputCppProps,
+    //     ".vscode/c_cpp_properties.json",
+    // );
 
     b.installArtifact(lspProgram);
 
     const lsp = b.step("lsp", "generate the necessary info for your lsp to work");
     lsp.dependOn(&installCompFlags.step);
-    lsp.dependOn(&installCppProps.step);
+    // lsp.dependOn(&installCppProps.step);
 }
 
 pub fn addPlatformioIniStep(

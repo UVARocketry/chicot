@@ -126,7 +126,7 @@ pub fn main() !void {
                                 };
                             }
                         }
-                        @panic("No depency found!");
+                        @panic("No dependency found!");
                     };
                     // append the dependency to the array
                     try deps.append(allocator, newDep);
@@ -161,7 +161,12 @@ pub fn main() !void {
                     try outIow.writeAll(", ");
                 }
                 first = false;
-                try outIow.print("{s}", .{dep.url});
+                const libOpening = "./lib/";
+                if (std.mem.startsWith(u8, dep.url, libOpening)) {
+                    try outIow.print("{s}", .{dep.url[libOpening.len..]});
+                } else {
+                    try outIow.print("{s}", .{dep.url});
+                }
             }
             try outIow.print("\n", .{});
 
@@ -198,6 +203,7 @@ pub fn main() !void {
             }
             try outIow.print(" -Lzig-out/lib -lzig", .{});
 
+            try outIow.print(" -Izig-out/include -Izig-out/include/depheaders", .{});
             try outIow.print("\n", .{});
             try outIow.print("\n", .{});
         }

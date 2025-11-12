@@ -70,6 +70,7 @@ pub const BuildInfo = struct {
         .platformio,
         .dependencies,
         .outputTypes,
+        .installHeaders,
     };
 
     pub const CppInfo = struct {
@@ -278,7 +279,13 @@ pub const BuildInfo = struct {
         }
     };
 
+    pub const InstallHeader = struct {
+        fromDir: []const u8,
+        toDir: []const u8,
+    };
+
     __id: ?IdType = null,
+    installHeaders: []InstallHeader = &.{},
     description: []const u8,
     cpp: CppInfo = .{},
     target: ?[]const u8 = null,
@@ -296,7 +303,7 @@ pub const BuildInfo = struct {
 };
 
 pub const BuildDefaults = struct {
-    mode: []const u8 = "platformio",
+    mode: []const u8 = "desktop",
     targets: zonParse.Map(std.Target.Query.ParseOptions),
 };
 

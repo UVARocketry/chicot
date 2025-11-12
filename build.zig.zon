@@ -1,6 +1,6 @@
 .{
     .name = .chicot,
-    .version = "0.0.0",
+    .version = "0.0.1",
     .fingerprint = 0x2f52ef66cad5ba4f,
     .minimum_zig_version = "0.15.1",
     .dependencies = .{},
