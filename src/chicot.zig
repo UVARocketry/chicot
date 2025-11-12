@@ -332,7 +332,22 @@ pub fn createModulesAndLibs(
         const depLibZigMod = dep.module(depInfo.dependencyName);
         const depLibCpp =
             if (resolvedInfo.buildType == .desktop) dep.artifact("cpp") else null;
-        const depLibZigObj = dep.namedLazyPath("obj/zig.o");
+
+        // OK so... FOR SOME REASON, when we are building for platformio,
+        // we have to link all objects together and stuff,
+        // but when we are building for python modules, it is better to link
+        // in libzig
+        const depLibZigObj =
+            if (resolvedInfo.buildType == .teensy41)
+                dep.namedLazyPath("obj/zig.o")
+            else
+                null;
+
+        const depLibZig =
+            if (resolvedInfo.buildType == .desktop)
+                dep.artifact("zig")
+            else
+                null;
         const headers = dep.artifact("headers");
         const depsDepHeaders = dep.artifact("depheaders");
 
@@ -345,6 +360,7 @@ pub fn createModulesAndLibs(
             mod.addImport(depInfo.importName orelse depInfo.dependencyName, depLibZigMod);
             mod.addIncludePath(headersTree);
             mod.linkLibrary(depLibCpp.?);
+            python.?.linkLibrary(depLibCpp.?);
         }
 
         if (exeMod) |mod| {
@@ -370,7 +386,12 @@ pub fn createModulesAndLibs(
             depLibZigMod,
         );
         // std.debug.print("Adding object and stuff for {s}!\n", .{depInfo.dependencyName});
-        libzig.addObjectFile(depLibZigObj);
+        if (depLibZigObj) |d| {
+            libzig.addObjectFile(d);
+        }
+        if (depLibZig) |d| {
+            libzig.linkLibrary(d);
+        }
     }
     return .{
         .libcpp = actualLibCpp,
@@ -798,18 +819,18 @@ pub fn build(
         b.installArtifact(modules.platformioClangdCompatHeaders);
     }
 
-    if (std.mem.containsAtLeastScalar(
-        BuildInfo.OutputType,
-        outputTypes,
-        1,
-        .libzig,
-    ) and resolvedInfo.buildEverything) {
-        // std.debug.print("Installing libzig!\n", .{});
-        b.installArtifact(modules.libzig);
-        check.dependOn(&modules.libzig.step);
-        // b.installArtifact(modules.zigobject);
-        // check.dependOn(&modules.zigobject.step);
-    }
+    // if (std.mem.containsAtLeastScalar(
+    //     BuildInfo.OutputType,
+    //     outputTypes,
+    //     1,
+    //     .libzig,
+    // ) and resolvedInfo.buildEverything) {
+    // std.debug.print("Installing libzig!\n", .{});
+    b.installArtifact(modules.libzig);
+    check.dependOn(&modules.libzig.step);
+    // b.installArtifact(modules.zigobject);
+    // check.dependOn(&modules.zigobject.step);
+    // }
     if (std.mem.containsAtLeastScalar(
         BuildInfo.OutputType,
         outputTypes,
