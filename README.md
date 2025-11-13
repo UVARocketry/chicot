@@ -46,10 +46,6 @@ Unfortunately, chicot does ***not*** currently support lsp information generatio
 
 If you have updated the lsp information (with `zig build lsp -p .`) but clangd is still showing errors then save the file and everything should start working again.
 
-#### A note about goto definition
-
-Goto-definition for files outside the current package will send you ***NOT TO WHERE THE FILE ACTUALLY LIVES***, but instead it will send you somewhere into `./zig-out/include/...`. Do NOT edit files outside of your current directory if you have gone there with goto-definition. These changes ***WILL NOT BE SAVED AND WILL BE DELETED*** next time you run `zig build`. If you want to actually edit those files, instead find their location in their actual package, and edit that file, then re-fetch the library you edited with `zig fetch --save ...`
-
 #### Platformio.ini generation
 
 If a project is setup to use platformio for the embedded build system, then you will need to run `zig build pio -p .` to autogenerate the `platformio.ini` and accompanying `checkpio.py` build files. If the platformio.ini file is out of sync with Chicot's current build info, then platformio will prompt you to rerun `zig build pio -p .` when you next run `pio run ...`
