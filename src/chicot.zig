@@ -688,6 +688,11 @@ pub fn build(
     options: BuildOptions,
 ) !Modules {
     _ = options;
+    std.debug.print("target: {t}-{t}-{t}\n", .{
+        builtin.cpu.arch,
+        builtin.os.tag,
+        builtin.abi,
+    });
     // const spaceCount = b.option(u8, "__spaceCount", "ooga") orelse 0;
     const start = std.time.microTimestamp();
     _ = start;
