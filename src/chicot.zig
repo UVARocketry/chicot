@@ -842,7 +842,7 @@ pub fn build(
         1,
         .pythonmodule,
     ) and resolvedInfo.buildEverything) {
-        if (resolvedInfo.target.result.os.tag != builtin.os.tag) {
+        if (resolvedInfo.target.result.os.tag != builtin.os.tag or resolvedInfo.target.result.abi != builtin.abi or resolvedInfo.target.result.cpu.arch != builtin.cpu.arch) {
             std.debug.print(
                 "Skipping python install because you are cross compiling!\n",
                 .{},
