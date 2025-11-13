@@ -837,8 +837,14 @@ pub fn build(
         1,
         .pythonmodule,
     ) and resolvedInfo.buildEverything) {
+        if (resolvedInfo.target.result.os.tag != builtin.os.tag) {
+            std.debug.print(
+                "Skipping python install because you are cross compiling!\n",
+                .{},
+            );
+        }
         // std.debug.print("Installing py!\n", .{});
-        if (modules.python) |py| {
+        else if (modules.python) |py| {
             b.installArtifact(py);
             check.dependOn(&py.step);
             const soExtension = if (builtin.os.tag == .windows)
