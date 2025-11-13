@@ -963,7 +963,7 @@ pub fn build(
                 "python/{s}.{s}",
                 .{ projectName, soExtension },
             );
-            std.debug.print("Installing {s}\n", .{name});
+            // std.debug.print("Installing {s}\n", .{name});
 
             const pyStep = b.step("py", "Installs the python module to the canonical location");
             const step = b.addInstallFile(

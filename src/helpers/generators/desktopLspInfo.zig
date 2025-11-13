@@ -50,332 +50,52 @@ pub fn getFileContents(
     return buf;
 }
 
-/// A std.Io.Reader implementation that discards the line comments from
-/// a passed std.Io.Reader as it reads the data (assuming that data is in json format).
-pub const JsonCommentDiscardReader = struct {
-    reader: *std.Io.Reader,
-    interface: std.Io.Reader,
-    inComment: bool,
-    inString: bool,
-    seenOneSlash: bool,
-    forwardBuf: ?u8 = null,
-    debugStr: std.ArrayList(u8) = .{},
-    debugAlloc: ?std.mem.Allocator = null,
-
-    pub fn init(reader: *std.Io.Reader, buf: []u8) JsonCommentDiscardReader {
-        return .{
-            .inString = false,
-            .inComment = false,
-            .seenOneSlash = false,
-            .reader = reader,
-            .interface = .{
-                .seek = 0,
-                .end = 0,
-                .buffer = buf,
-                .vtable = &.{
-                    .stream = stream,
-                },
-            },
-        };
-    }
-
-    pub fn stream(reader: *std.Io.Reader, writer: *std.Io.Writer, len: std.Io.Limit) !usize {
-        const self: *JsonCommentDiscardReader = @fieldParentPtr("interface", reader);
-
-        const buffered = reader.buffered();
-
-        var bytesWritten: usize = 0;
-        // std.debug.print("Bytes: {} {}\n", .{ bytesWritten, len });
-
-        // std.debug.print("Buffered: {}\n", .{buffered.len});
-        for (buffered) |c| {
-            bytesWritten = try self.writeChar(writer, c, len, bytesWritten);
-            reader.toss(1);
-            if (len != .unlimited and bytesWritten == len.toInt() orelse unreachable) {
-                return bytesWritten;
-            }
-        }
-
-        if (self.forwardBuf) |f| {
-            // std.debug.print("Forwarding {c}\n", .{f});
-            try writer.writeByte(f);
-            bytesWritten += 1;
-        }
-        if (len != .unlimited and bytesWritten == len.toInt() orelse unreachable) {
-            return bytesWritten;
-        }
-        // std.debug.print("No\n", .{});
-
-        const lenInt = len.toInt() orelse std.math.maxInt(usize);
-
-        while (bytesWritten < lenInt) {
-            var readBuf: [64]u8 = undefined;
-
-            // std.debug.print("Choosing from lens: {} {}\n", .{ lenInt - bytesWritten, readBuf.len });
-
-            const slice = (&readBuf)[0..@min(lenInt - bytesWritten, readBuf.len)];
-            if (slice.len == 0) {
-                // std.debug.print("0 len slice ?\n\n", .{});
-                break;
-            }
-
-            const readCount = try self.reader.readSliceShort(slice);
-
-            const actualSlice = slice[0..readCount];
-            if (readCount == 0) {
-                // std.debug.print("0 len read slice ?\n\n", .{});
-                return error.EndOfStream;
-            }
-
-            // it's impossible to overrun the writer len here bc we explicitly size our
-            // buf for that to not happen with @min
-            for (actualSlice) |c| {
-                bytesWritten = try self.writeChar(writer, c, len, bytesWritten);
-            }
-            // std.debug.print("Wrote {} bytes\n", .{bytesWritten});
-
-            if (len != .unlimited and bytesWritten == len.toInt() orelse unreachable) {
-                return bytesWritten;
-            }
-            if (readCount < slice.len) {
-                return bytesWritten;
-            }
-        }
-        return bytesWritten;
-    }
-
-    // RULES:
-    //
-    // inString, inComment, seenOneSlash => behavior
-    // true         true        true     => not allowed!
-    // true         true        false    => not allowed!
-    // true         false       _        =>
-    //      forward char.
-    //      if " or '
-    //          unset inString
-    // false        true        _        =>
-    //      skip.
-    //      if \n
-    //          unset inComment
-    // false        false       true     =>
-    //      unset seenOneSlash.
-    //      if /
-    //          set inComment
-    //      elseif " or '
-    //          set inString. forward char
-    //      else
-    //          forward a slash BEFORE forwarding char
-    // false        false       false    => forward char. if /, set inComment
-    //      if /
-    //          set seenOneSlash
-    //      elseif " or '
-    //          set inString. forward char
-    //      else
-    //          forward char
-
-    /// this assumes len < currentCount
-    pub fn writeChar(
-        self: *JsonCommentDiscardReader,
-        writer: *std.Io.Writer,
-        char: u8,
-        lenlim: std.Io.Limit,
-        currentCount: usize,
-    ) !usize {
-        var ret = currentCount;
-        const len: usize = lenlim.toInt() orelse std.math.maxInt(usize);
-        if (self.forwardBuf) |f| {
-            // std.debug.print("Forwarding char from buf '{c}'\n", .{f});
-            try self.write(writer, f);
-            ret += 1;
-            self.forwardBuf = null;
-        }
-        // std.debug.print("Parsing char '{c}'\n", .{char});
-        if (ret == len) {
-            // std.debug.print("Forwarding char due to full buf \n", .{});
-            self.forwardBuf = char;
-            return ret;
-        }
-        if (self.inString and self.inComment) {
-            @panic("Banned field combination!");
-        }
-
-        if (self.inString) {
-            // std.debug.print("in string\n", .{});
-            if (char == '"' or char == '\'') {
-                // std.debug.print("exiting string\n", .{});
-                self.inString = false;
-            }
-            try self.write(writer, char);
-            ret += 1;
-            return ret;
-        }
-        if (self.inComment) {
-            // std.debug.print("in comment\n", .{});
-            if (char == '\n') {
-                // std.debug.print("ending comment\n", .{});
-                self.inComment = false;
-            }
-            return ret;
-        }
-        if (self.seenOneSlash) {
-            // std.debug.print("Last was slash\n", .{});
-            self.seenOneSlash = false;
-            if (char == '/') {
-                // std.debug.print("entering comment\n", .{});
-                self.inComment = true;
-                return ret;
-            }
-            if (char == '"' or char == '\'') {
-                self.inString = true;
-            }
-            try self.write(writer, '/');
-            ret += 1;
-            if (ret == len) {
-                self.forwardBuf = char;
-                return ret;
-            }
-            try self.write(writer, char);
-            ret += 1;
-            return ret;
-        } else {
-            if (char == '/') {
-                self.seenOneSlash = true;
-                return ret;
-            }
-            if (char == '"' or char == '\'') {
-                self.inString = true;
-            }
-            try self.write(writer, char);
-            ret += 1;
-            return ret;
-        }
-    }
-
-    pub fn write(self: *JsonCommentDiscardReader, writer: *std.Io.Writer, byte: u8) !void {
-        if (self.debugAlloc) |alloc| {
-            self.debugStr.append(alloc, byte) catch unreachable;
-            // std.debug.print("Written bytes: {s}\n", .{self.debugStr.items});
-        }
-        // std.debug.print("Writing!\n", .{});
-        try writer.writeByte(byte);
-    }
+const DependencyInfo = struct {
+    name: []const u8,
+    location: union(enum) {
+        url: []const u8,
+        path: []const u8,
+    },
 };
-
-pub fn addToJson(
-    arena: std.mem.Allocator,
-    modeInfo: anytype,
-    currentCppProps: []const u8,
-    cCppProps: []const u8,
-    pythonInc: []const u8,
+pub fn getTheseDeps(
+    allocator: std.mem.Allocator,
+    val: ZonType,
     mode: []const u8,
-    fileBuf: []u8,
-) !void {
-    const currentPropsFile = try std.fs.openFileAbsolute(currentCppProps, .{
-        .mode = .read_only,
-    });
-    defer currentPropsFile.close();
-    var buf: [512]u8 = undefined;
-    var r = currentPropsFile.reader(&buf);
-    const ior = &r.interface;
-    var jsonBuf: [512]u8 = undefined;
-    var jsonCommentReader: JsonCommentDiscardReader = .init(ior, &jsonBuf);
-    jsonCommentReader.debugAlloc = arena;
+) []DependencyInfo {
+    var deps: std.ArrayList(DependencyInfo) = .{};
 
-    var jsonScanner: std.json.Scanner.Reader = .init(
-        arena,
-        &jsonCommentReader.interface,
-    );
-    defer jsonScanner.deinit();
+    const next = val.get(mode);
 
-    // TODO: For invalid json files, just overwrite them
-    var v = try std.json.parseFromTokenSource(CppPropsJson, arena, &jsonScanner, .{});
-    defer v.deinit();
-
-    // 1 for src/
-    // 1 for Python.h
-    const includePathLen = 1 + 1 + modeInfo.cpp.include.len;
-
-    const include = try arena.alloc([]const u8, includePathLen);
-    include[0] = "src";
-    include[1] = pythonInc;
-
-    @memcpy(include[2..], modeInfo.cpp.include);
-
-    const cppstd = blk: {
-        for (modeInfo.cpp.otherFlags) |f| {
-            const stdflag = "-std=";
-            if (std.mem.startsWith(u8, f, stdflag)) {
-                break :blk f[stdflag.len..];
-            }
-        }
-        break :blk "c++11";
-    };
-
-    var defines: std.ArrayList([]const u8) = .{};
-    defer defines.deinit(arena);
-
-    if (modeInfo.cpp.define) |d| {
-        var iter = d.map.iterator();
-
-        while (iter.next()) |k| {
-            if (k.value_ptr.*) |value| {
-                if (value.len == 0) {
-                    try defines.append(arena, k.key_ptr.*);
-                } else {
-                    try defines.append(
-                        arena,
-                        try std.fmt.allocPrint(
-                            arena,
-                            "{s}={s}",
-                            .{ k.key_ptr.*, value },
-                        ),
-                    );
-                }
-            }
-        }
-    }
-
-    const config: CppPropsJson.Configuration = .{
-        .name = mode,
-        .includePath = include,
-        .defines = defines.items,
-        .cppStandard = cppstd,
-        .compilerArgs = modeInfo.cpp.otherFlags,
-        .compilerPath = "clang",
-        .browse = .{
-            .limitSymbolsToIncludedHeaders = false,
-            .path = include,
-        },
-    };
-
-    if (v.value.configurations.len == 0) {
-        var configBuf: [1]CppPropsJson.Configuration = .{config};
-        v.value.configurations = &configBuf;
-    } else {
-        // TODO: check if there is already a config slot that contains
-        // data for this mode and overwrite it if so
-
-        for (v.value.configurations, 0..) |conf, i| {
-            if (std.mem.eql(u8, conf.name, config.name)) {
-                v.value.configurations[i] = conf;
+    // for all actual dependencies it uses...
+    for (next.value_ptr.dependencies) |dep| {
+        for (deps.items) |currentDep| {
+            if (std.mem.eql(u8, currentDep.name, dep.dependencyName)) {
                 break;
             }
         } else {
-            const newMem = try arena.alloc(CppPropsJson.Configuration, v.value.configurations.len + 1);
-            newMem[0] = config;
-            @memcpy(newMem[1..], v.value.configurations);
-            v.value.configurations = newMem;
+            // if we have not yet encountered that dependency...
+            const newDep: DependencyInfo = blk: {
+                // find the dependency we want...
+                inline for (@typeInfo(@TypeOf(zon.dependencies)).@"struct".fields) |f| {
+                    if (std.mem.eql(u8, f.name, dep.dependencyName)) {
+                        const field = @field(zon.dependencies, f.name);
+                        // create a dependency object
+                        break :blk .{
+                            .name = f.name,
+                            .location = if (@hasField(@TypeOf(field), "url"))
+                                .{ .url = field.url }
+                            else
+                                .{ .path = field.path },
+                        };
+                    }
+                }
+                @panic("No dependency found!");
+            };
+            // append the dependency to the array
+            try deps.append(allocator, newDep);
         }
     }
-
-    const cppPropsFile = try std.fs.createFileAbsolute(cCppProps, .{ .truncate = true });
-    defer cppPropsFile.close();
-    var cppPropsWriter = cppPropsFile.writer(fileBuf);
-    const cpppropsiow = &cppPropsWriter.interface;
-
-    try std.json.fmt(v.value, .{}).format(cpppropsiow);
-
-    try cpppropsiow.flush();
+    return deps;
 }
 
 pub fn main() !void {
@@ -426,6 +146,8 @@ pub fn main() !void {
     var soWriter = std.fs.File.stdout().writer(&soBuf);
     const stdout = &soWriter.interface;
 
+    const deps = getTheseDeps(allocator, val, mode);
+
     var fileBuf: [512]u8 = undefined;
     {
         const cFlagsFile = try std.fs.createFileAbsolute(compileFlags, .{ .truncate = true });
@@ -446,6 +168,15 @@ pub fn main() !void {
         )) {
             try cflagsiow.print("-I{s}\n", .{pythonInc});
         }
+        for (deps) |dep| {
+            switch (dep.location) {
+                .path => |p| {
+                    try cflagsiow.print("-I{s}\n", .{p});
+                },
+                .url => |_| {},
+            }
+        }
+
         try cflagsiow.print("-Izig-out/include/{s}\n", .{depHeaders});
 
         for (modeInfo.cpp.otherFlags) |flag| {
