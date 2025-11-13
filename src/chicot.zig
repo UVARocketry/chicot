@@ -842,7 +842,16 @@ pub fn build(
         1,
         .pythonmodule,
     ) and resolvedInfo.buildEverything) {
-        if (resolvedInfo.target.result.os.tag != builtin.os.tag or resolvedInfo.target.result.abi != builtin.abi or resolvedInfo.target.result.cpu.arch != builtin.cpu.arch) {
+        const forceBuildPy = b.option(
+            bool,
+            "forceBuildPy",
+            "Whether to force building python modules (only matters if you are cross compiling",
+        ) orelse false;
+        const differentOs = resolvedInfo.target.result.os.tag != builtin.os.tag;
+        const differentAbi = resolvedInfo.target.result.abi != builtin.abi;
+        const differentCpu = resolvedInfo.target.result.cpu.arch != builtin.cpu.arch;
+        const crossCompiling = differentOs or differentAbi or differentCpu;
+        if (!forceBuildPy and crossCompiling) {
             std.debug.print(
                 "Skipping python install because you are cross compiling!\n",
                 .{},
