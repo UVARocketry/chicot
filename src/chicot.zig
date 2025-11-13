@@ -25,6 +25,7 @@ pub const PythonInfo = struct {
 
     python_exe: []const u8,
     b: *std.Build,
+    targetOs: std.Target.Os.Tag,
 
     pub fn getIncludePath(self: *PythonInfo) []const u8 {
         if (self._include) |i| return i;
@@ -50,6 +51,7 @@ pub const PythonInfo = struct {
         self._version = getPythonLDVersion(
             self.python_exe,
             self.b.allocator,
+            self.targetOs,
         ) catch @panic("Missing python");
         return self._version.?;
     }
@@ -65,7 +67,11 @@ pub const PythonInfo = struct {
     }
 };
 
-pub fn getPythonInfo(b: *std.Build, pythonExe: ?[]const u8) PythonInfo {
+pub fn getPythonInfo(
+    b: *std.Build,
+    pythonExe: ?[]const u8,
+    resolvedInfo: FullBuildInfo,
+) PythonInfo {
     const python_exe =
         pythonExe orelse
         b.option([]const u8, "python-exe", "Python executable to use") orelse
@@ -76,6 +82,7 @@ pub fn getPythonInfo(b: *std.Build, pythonExe: ?[]const u8) PythonInfo {
     return .{
         .b = b,
         .python_exe = python_exe,
+        .targetOs = resolvedInfo.target.result.os.tag,
         // .include = pythonInc,
         // .lib = pythonLib,
         // .version = pythonVer,
@@ -105,6 +112,66 @@ pub const Modules = struct {
 pub const compatHeadersDir = "platformio-clangd-compat-headers";
 const headerExtensions: []const []const u8 = &.{ "hpp", "h", "hh", "" };
 const headerExcludeExtensions: []const []const u8 = &.{ "cc", "cpp", "c", "zig" };
+
+pub fn convertWinePathToLinuxPath(
+    alloc: std.mem.Allocator,
+    path: []const u8,
+) ![]const u8 {
+    const home = try std.process.getEnvVarOwned(alloc, "HOME");
+    std.debug.print("HOME: {s}\n", .{home});
+    defer alloc.free(home);
+    const winePrefix = std.process.getEnvVarOwned(
+        alloc,
+        "WINEPREFIX",
+    ) catch try std.fs.path.join(
+        alloc,
+        &.{ home, ".wine" },
+    );
+    std.debug.print("WINEPREFIX: {s}\n", .{winePrefix});
+    defer alloc.free(winePrefix);
+    const actualWineLocation = try std.fs.path.join(
+        alloc,
+        &.{ winePrefix, "drive_c" },
+    );
+    std.debug.print("C:\\: {s}\n", .{actualWineLocation});
+    defer alloc.free(actualWineLocation);
+    const newName = try std.fs.path.join(
+        alloc,
+        &.{
+            actualWineLocation,
+            path[3..],
+        },
+    );
+    for (newName, 0..) |c, i| {
+        if (c == '\\') {
+            newName[i] = '/';
+        }
+    }
+    std.debug.print("New name: {s}\n", .{newName});
+    return newName;
+}
+
+pub fn optionallyConvertWinePath(
+    alloc: std.mem.Allocator,
+    path: []const u8,
+    resolvedInfo: FullBuildInfo,
+) ![]const u8 {
+    if (builtin.os.tag == .linux and
+        resolvedInfo.target.result.os.tag == .windows)
+    {
+        const name = path;
+        std.debug.print("Cross compiling!\n", .{});
+        std.debug.print("Resolving: {s}\n", .{name});
+        if (std.mem.startsWith(u8, name, "C:/") or std.mem.startsWith(u8, name, "C:\\")) {
+            const newName = try convertWinePathToLinuxPath(alloc, name);
+            return newName;
+        } else {
+            return path;
+        }
+    } else {
+        return path;
+    }
+}
 
 pub fn createModulesAndLibs(
     b: *std.Build,
@@ -200,8 +267,16 @@ pub fn createModulesAndLibs(
         });
         pythonMod.addImport(projectName, libzigMod);
         pythonMod.addIncludePath(b.path(b.pathJoin(&rootSrcDirs)));
-        pythonMod.addIncludePath(.{ .cwd_relative = pyInfo.getIncludePath() });
-        pythonMod.addLibraryPath(.{ .cwd_relative = pyInfo.getLibraryPath() });
+        pythonMod.addIncludePath(.{ .cwd_relative = try optionallyConvertWinePath(
+            b.allocator,
+            pyInfo.getIncludePath(),
+            resolvedInfo,
+        ) });
+        pythonMod.addLibraryPath(.{ .cwd_relative = try optionallyConvertWinePath(
+            b.allocator,
+            pyInfo.getLibraryPath(),
+            resolvedInfo,
+        ) });
         pythonMod.linkLibrary(actualLibCpp);
         const rootPythonDirs: [2][]const u8 = .{ rootDir, pyDir };
         recursivelyAddIncludeDirs(b, pythonMod, b.pathJoin(&rootPythonDirs));
@@ -288,7 +363,25 @@ pub fn createModulesAndLibs(
         });
         python.linkLibCpp();
         python.linkLibrary(libCppForDeps);
-        python.linkSystemLibrary(pyInfo.getLibName());
+
+        // if (builtin.os.tag == .linux and
+        //     resolvedInfo.target.result.os.tag == .windows)
+        // {
+        //     const name = pyInfo.getLibName();
+        //     std.debug.print("Cross compiling to windows {s}\n", .{name});
+        //     if (std.mem.startsWith(u8, name, "C:/")) {
+        //         const newName = convertWinePathToLinuxPath(b.allocator, name);
+        //         mod.linkSystemLibrary(newName, .{});
+        //     } else {
+        //         mod.linkSystemLibrary(name, .{});
+        //     }
+        // } else {
+        mod.linkSystemLibrary(try optionallyConvertWinePath(
+            b.allocator,
+            pyInfo.getLibName(),
+            resolvedInfo,
+        ), .{});
+        // }
 
         break :blk python;
     } else null;
@@ -719,7 +812,7 @@ pub fn build(
 
     const rootDir = ".";
 
-    var pyInfo = getPythonInfo(b, null);
+    var pyInfo = getPythonInfo(b, null, resolvedInfo);
 
     // timestamp("Python resolution", &timestampStart);
 
@@ -856,12 +949,11 @@ pub fn build(
                 "Skipping python install because you are cross compiling!\n",
                 .{},
             );
-        }
-        // std.debug.print("Installing py!\n", .{});
-        else if (modules.python) |py| {
+        } else if (modules.python) |py| {
+            // std.debug.print("Installing py!\n", .{});
             b.installArtifact(py);
             check.dependOn(&py.step);
-            const soExtension = if (builtin.os.tag == .windows)
+            const soExtension = if (resolvedInfo.target.result.os.tag == .windows)
                 "pyd"
             else
                 "so";
@@ -871,7 +963,7 @@ pub fn build(
                 "python/{s}.{s}",
                 .{ projectName, soExtension },
             );
-            // std.debug.print("Installing {s}\n", .{name});
+            std.debug.print("Installing {s}\n", .{name});
 
             const pyStep = b.step("py", "Installs the python module to the canonical location");
             const step = b.addInstallFile(
@@ -1032,9 +1124,13 @@ fn getPythonLibraryPath(
 
 /// Returns the version of the python program installed.
 /// REQUIRES python to be installed
-fn getPythonLDVersion(python_exe: []const u8, allocator: std.mem.Allocator) ![]const u8 {
+fn getPythonLDVersion(
+    python_exe: []const u8,
+    allocator: std.mem.Allocator,
+    targetOs: std.Target.Os.Tag,
+) ![]const u8 {
     // yes because of course windows does something different
-    const getLdVersion = if (builtin.os.tag == .windows)
+    const getLdVersion = if (targetOs == .windows)
         "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}', end='')"
     else
         "import sysconfig; print(sysconfig.get_config_var('LDVERSION'), end='')";
