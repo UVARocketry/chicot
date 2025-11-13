@@ -61,13 +61,13 @@ pub fn getTheseDeps(
     allocator: std.mem.Allocator,
     val: ZonType,
     mode: []const u8,
-) []DependencyInfo {
+) ![]DependencyInfo {
     var deps: std.ArrayList(DependencyInfo) = .{};
 
     const next = val.get(mode);
 
     // for all actual dependencies it uses...
-    for (next.value_ptr.dependencies) |dep| {
+    for (next.dependencies) |dep| {
         for (deps.items) |currentDep| {
             if (std.mem.eql(u8, currentDep.name, dep.dependencyName)) {
                 break;
@@ -95,7 +95,7 @@ pub fn getTheseDeps(
             try deps.append(allocator, newDep);
         }
     }
-    return deps;
+    return deps.items;
 }
 
 pub fn main() !void {
@@ -146,7 +146,7 @@ pub fn main() !void {
     var soWriter = std.fs.File.stdout().writer(&soBuf);
     const stdout = &soWriter.interface;
 
-    const deps = getTheseDeps(allocator, val, mode);
+    const deps = try getTheseDeps(allocator, val, mode);
 
     var fileBuf: [512]u8 = undefined;
     {
@@ -171,7 +171,7 @@ pub fn main() !void {
         for (deps) |dep| {
             switch (dep.location) {
                 .path => |p| {
-                    try cflagsiow.print("-I{s}\n", .{p});
+                    try cflagsiow.print("-I{s}/src\n", .{p});
                 },
                 .url => |_| {},
             }
