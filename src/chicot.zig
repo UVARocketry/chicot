@@ -629,26 +629,26 @@ pub fn resolveBuildInformation(b: *std.Build, zon: anytype) !FullBuildInfo {
         };
     }
 
-    std.debug.print("cpp info: \n", .{});
-    std.debug.print("  include: \n", .{});
-    for (modeInfo.cpp.include) |inc| {
-        std.debug.print("    - {s}\n", .{inc});
-    }
-    std.debug.print("  link:\n", .{});
-    for (modeInfo.cpp.linkPath) |link| {
-        std.debug.print("    - {s}\n", .{link});
-    }
-    std.debug.print("  flags:\n", .{});
-    for (modeInfo.cpp.otherFlags) |flag| {
-        std.debug.print("    {s}\n", .{flag});
-    }
-    if (modeInfo.cpp.define) |d| {
-        var iter = d.map.iterator();
-        std.debug.print("  define:\n", .{});
-        while (iter.next()) |next| {
-            std.debug.print("    {s} = {s}\n", .{ next.key_ptr.*, next.value_ptr.* orelse "UNDEFINED" });
-        }
-    }
+    // std.debug.print("cpp info: \n", .{});
+    // std.debug.print("  include: \n", .{});
+    // for (modeInfo.cpp.include) |inc| {
+    //     std.debug.print("    - {s}\n", .{inc});
+    // }
+    // std.debug.print("  link:\n", .{});
+    // for (modeInfo.cpp.linkPath) |link| {
+    //     std.debug.print("    - {s}\n", .{link});
+    // }
+    // std.debug.print("  flags:\n", .{});
+    // for (modeInfo.cpp.otherFlags) |flag| {
+    //     std.debug.print("    {s}\n", .{flag});
+    // }
+    // if (modeInfo.cpp.define) |d| {
+    //     var iter = d.map.iterator();
+    //     std.debug.print("  define:\n", .{});
+    //     while (iter.next()) |next| {
+    //         std.debug.print("    {s} = {s}\n", .{ next.key_ptr.*, next.value_ptr.* orelse "UNDEFINED" });
+    //     }
+    // }
 
     const optimize = b.standardOptimizeOption(.{
         .preferred_optimize_mode = modeInfo.optimize,
