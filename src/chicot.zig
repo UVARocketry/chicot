@@ -94,7 +94,7 @@ pub const Modules = struct {
     libzig: *std.Build.Step.Compile,
     libzigMod: *std.Build.Module,
     libcpp: *std.Build.Step.Compile,
-    depLibcpp: *std.Build.Step.Compile,
+    depLibcpp: []*std.Build.Step.Compile,
     cppMod: *std.Build.Module,
     zigobject: *std.Build.Step.Compile,
     compatHeadersDir: []const u8,
@@ -402,6 +402,8 @@ pub fn createModulesAndLibs(
     actualLibCpp.linkLibrary(depHeaderLib);
     cppMod.linkLibrary(depHeaderLib);
 
+    var libCpps: std.ArrayList(*std.Build.Step.Compile) = .empty;
+
     for (resolvedInfo.buildInfo.dependencies) |depInfo| {
         var rootFlags: []const []const u8 = undefined;
         var parentFlags: []const []const u8 = undefined;
@@ -425,7 +427,11 @@ pub fn createModulesAndLibs(
 
         const depLibZigMod = dep.module(depInfo.dependencyName);
         const depLibCpp =
-            if (resolvedInfo.buildType == .desktop) dep.artifact("cpp") else null;
+            if (resolvedInfo.buildType == .desktop) blk: {
+                const l = dep.artifact("cpp");
+                try libCpps.append(b.allocator, l);
+                break :blk l;
+            } else null;
 
         // OK so... FOR SOME REASON, when we are building for platformio,
         // we have to link all objects together and stuff,
@@ -454,7 +460,7 @@ pub fn createModulesAndLibs(
             mod.addImport(depInfo.importName orelse depInfo.dependencyName, depLibZigMod);
             mod.addIncludePath(headersTree);
             mod.linkLibrary(depLibCpp.?);
-            python.?.linkLibrary(depLibCpp.?);
+            // python.?.linkLibrary(depLibCpp.?);
         }
 
         if (exeMod) |mod| {
@@ -501,7 +507,7 @@ pub fn createModulesAndLibs(
         .exe = exe,
         .pythonMod = pythonMod,
         .exeMod = exeMod,
-        .depLibcpp = libCppForDeps,
+        .depLibcpp = libCpps.items,
         // .rootMod = rootMod,
         .libzigMod = libzigMod,
         .zigobject = zigObj,
