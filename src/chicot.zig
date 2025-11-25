@@ -295,6 +295,7 @@ pub fn createModulesAndLibs(
             .target = target,
             .optimize = optimize,
         });
+        exeMod.addImport(projectName, libzigMod);
         exeMod.addIncludePath(b.path(b.pathJoin(&rootSrcDirs)));
         exeMod.linkLibrary(actualLibCpp);
         const rootDesktopDirs: [2][]const u8 = .{ rootDir, desktopDir };
