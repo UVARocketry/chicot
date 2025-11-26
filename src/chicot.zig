@@ -186,6 +186,7 @@ pub fn createModulesAndLibs(
     const rootZig = fileExists(b, mainDir, "root.zig");
     const pyrootZig = fileExists(b, pyDir, "python.zig");
     const desktopZig = fileExists(b, desktopDir, "main.zig");
+    const altDesktopZig = fileExists(b, mainDir, "main.zig");
 
     const target = resolvedInfo.target;
     const optimize = resolvedInfo.optimize;
@@ -291,11 +292,13 @@ pub fn createModulesAndLibs(
     // it exists
     const exeMod = if (dirExists(b, desktopDir) and resolvedInfo.buildEverything) blk: {
         const exeMod = b.addModule("main", .{
-            .root_source_file = desktopZig,
+            .root_source_file = desktopZig orelse altDesktopZig,
             .target = target,
             .optimize = optimize,
         });
-        exeMod.addImport(projectName, libzigMod);
+        if (altDesktopZig == null) {
+            exeMod.addImport(projectName, libzigMod);
+        }
         exeMod.addIncludePath(b.path(b.pathJoin(&rootSrcDirs)));
         exeMod.linkLibrary(actualLibCpp);
         const rootDesktopDirs: [2][]const u8 = .{ rootDir, desktopDir };
