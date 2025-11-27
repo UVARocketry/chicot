@@ -1,52 +1,51 @@
 const builtin = @import("builtin");
 const std = @import("std");
+var _include: ?[]const u8 = null;
+var _lib: ?[]const u8 = null;
+var _version: ?[]const u8 = null;
+var _libName: ?[]const u8 = null;
 pub const PythonInfo = struct {
-    _include: ?[]const u8 = null,
-    _lib: ?[]const u8 = null,
-    _version: ?[]const u8 = null,
-    _libName: ?[]const u8 = null,
-
     python_exe: []const u8,
     b: *std.Build,
     targetOs: std.Target.Os.Tag,
 
     pub fn getIncludePath(self: *PythonInfo) []const u8 {
-        if (self._include) |i| return i;
+        if (_include) |i| return i;
         const pythonInc = getPythonIncludePath(
             self.python_exe,
             self.b.allocator,
         ) catch @panic("Missing python");
-        self._include = pythonInc;
-        return self._include.?;
+        _include = pythonInc;
+        return _include.?;
     }
     pub fn getLibraryPath(self: *PythonInfo) []const u8 {
-        if (self._lib) |l| return l;
+        if (_lib) |l| return l;
         const pythonLib = getPythonLibraryPath(
             self.python_exe,
             self.b.allocator,
         ) catch @panic("Missing python");
 
-        self._lib = pythonLib;
-        return self._lib.?;
+        _lib = pythonLib;
+        return _lib.?;
     }
     pub fn getLdVersion(self: *PythonInfo) []const u8 {
-        if (self._version) |v| return v;
-        self._version = getPythonLDVersion(
+        if (_version) |v| return v;
+        _version = getPythonLDVersion(
             self.python_exe,
             self.b.allocator,
             self.targetOs,
         ) catch @panic("Missing python");
-        return self._version.?;
+        return _version.?;
     }
     pub fn getLibName(self: *PythonInfo) []const u8 {
-        if (self._libName) |l| return l;
+        if (_libName) |l| return l;
         const pythonLibName = std.fmt.allocPrint(
             self.b.allocator,
             "python{s}",
             .{self.getLdVersion()},
         ) catch @panic("Missing python");
-        self._libName = pythonLibName;
-        return self._libName.?;
+        _libName = pythonLibName;
+        return _libName.?;
     }
 };
 
@@ -59,8 +58,6 @@ pub fn getPythonInfo(
         pythonExe orelse
         b.option([]const u8, "python-exe", "Python executable to use") orelse
         "python";
-
-    // std.debug.print("{s}\n{s}\n{s}\n{s}\n", .{ pythonInc, pythonLib, pythonVer, pythonLibName });
 
     return .{
         .b = b,
