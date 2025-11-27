@@ -1,8 +1,10 @@
 const std = @import("std");
+const wine = @import("./wine.zig");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 const zonParse = @import("helpers/parseZon.zig");
+const Py = @import("./python.zig");
 const steps = @import("./steps.zig");
 const buildInfo = @import("helpers/buildInfo.zig");
 const inherit = @import("helpers/inherit.zig");
@@ -16,79 +18,6 @@ pub const version = "0.0.0";
 pub const mainDir = "src";
 pub const desktopDir = "desktop";
 pub const pyDir = "python";
-
-pub const PythonInfo = struct {
-    _include: ?[]const u8 = null,
-    _lib: ?[]const u8 = null,
-    _version: ?[]const u8 = null,
-    _libName: ?[]const u8 = null,
-
-    python_exe: []const u8,
-    b: *std.Build,
-    targetOs: std.Target.Os.Tag,
-
-    pub fn getIncludePath(self: *PythonInfo) []const u8 {
-        if (self._include) |i| return i;
-        const pythonInc = getPythonIncludePath(
-            self.python_exe,
-            self.b.allocator,
-        ) catch @panic("Missing python");
-        self._include = pythonInc;
-        return self._include.?;
-    }
-    pub fn getLibraryPath(self: *PythonInfo) []const u8 {
-        if (self._lib) |l| return l;
-        const pythonLib = getPythonLibraryPath(
-            self.python_exe,
-            self.b.allocator,
-        ) catch @panic("Missing python");
-
-        self._lib = pythonLib;
-        return self._lib.?;
-    }
-    pub fn getLdVersion(self: *PythonInfo) []const u8 {
-        if (self._version) |v| return v;
-        self._version = getPythonLDVersion(
-            self.python_exe,
-            self.b.allocator,
-            self.targetOs,
-        ) catch @panic("Missing python");
-        return self._version.?;
-    }
-    pub fn getLibName(self: *PythonInfo) []const u8 {
-        if (self._libName) |l| return l;
-        const pythonLibName = std.fmt.allocPrint(
-            self.b.allocator,
-            "python{s}",
-            .{self.getLdVersion()},
-        ) catch @panic("Missing python");
-        self._libName = pythonLibName;
-        return self._libName.?;
-    }
-};
-
-pub fn getPythonInfo(
-    b: *std.Build,
-    pythonExe: ?[]const u8,
-    resolvedInfo: FullBuildInfo,
-) PythonInfo {
-    const python_exe =
-        pythonExe orelse
-        b.option([]const u8, "python-exe", "Python executable to use") orelse
-        "python";
-
-    // std.debug.print("{s}\n{s}\n{s}\n{s}\n", .{ pythonInc, pythonLib, pythonVer, pythonLibName });
-
-    return .{
-        .b = b,
-        .python_exe = python_exe,
-        .targetOs = resolvedInfo.target.result.os.tag,
-        // .include = pythonInc,
-        // .lib = pythonLib,
-        // .version = pythonVer,
-        // .libName = pythonLibName,
-    };
-}
 
 pub const Modules = struct {
     libzig: *std.Build.Step.Compile,
@@ -114,79 +43,21 @@ pub const compatHeadersDir = "platformio-clangd-compat-headers";
 const headerExtensions: []const []const u8 = &.{ "hpp", "h", "hh", "" };
 const headerExcludeExtensions: []const []const u8 = &.{ "cc", "cpp", "c", "zig" };
 
-pub fn convertWinePathToLinuxPath(
-    alloc: std.mem.Allocator,
-    path: []const u8,
-) ![]const u8 {
-    const home = try std.process.getEnvVarOwned(alloc, "HOME");
-    std.debug.print("HOME: {s}\n", .{home});
-    defer alloc.free(home);
-    const winePrefix = std.process.getEnvVarOwned(
-        alloc,
-        "WINEPREFIX",
-    ) catch try std.fs.path.join(
-        alloc,
-        &.{ home, ".wine" },
-    );
-    std.debug.print("WINEPREFIX: {s}\n", .{winePrefix});
-    defer alloc.free(winePrefix);
-    const actualWineLocation = try std.fs.path.join(
-        alloc,
-        &.{ winePrefix, "drive_c" },
-    );
-    std.debug.print("C:\\: {s}\n", .{actualWineLocation});
-    defer alloc.free(actualWineLocation);
-    const newName = try std.fs.path.join(
-        alloc,
-        &.{
-            actualWineLocation,
-            path[3..],
-        },
-    );
-    for (newName, 0..) |c, i| {
-        if (c == '\\') {
-            newName[i] = '/';
-        }
-    }
-    std.debug.print("New name: {s}\n", .{newName});
-    return newName;
-}
-
-pub fn optionallyConvertWinePath(
-    alloc: std.mem.Allocator,
-    path: []const u8,
-    resolvedInfo: FullBuildInfo,
-) ![]const u8 {
-    if (builtin.os.tag == .linux and
-        resolvedInfo.target.result.os.tag == .windows)
-    {
-        const name = path;
-        std.debug.print("Cross compiling!\n", .{});
-        std.debug.print("Resolving: {s}\n", .{name});
-        if (std.mem.startsWith(u8, name, "C:/") or std.mem.startsWith(u8, name, "C:\\")) {
-            const newName = try convertWinePathToLinuxPath(alloc, name);
-            return newName;
-        } else {
-            return path;
-        }
-    } else {
-        return path;
-    }
-}
-
 pub fn createModulesAndLibs(
     b: *std.Build,
     resolvedInfo: FullBuildInfo,
     chicot: *std.Build.Dependency,
     rootDir: []const u8,
     projectName: []const u8,
-    pyInfo: *PythonInfo,
+    pyInfo: *Py.PythonInfo,
     // spaceCount: usize,
 ) !Modules {
     const rootZig = fileExists(b, mainDir, "root.zig");
     const pyrootZig = fileExists(b, pyDir, "python.zig");
+    const pyModIsZig = pyrootZig != null;
     const desktopZig = fileExists(b, desktopDir, "main.zig");
     const altDesktopZig = fileExists(b, mainDir, "main.zig");
+    const exeIsZig = desktopZig != null or altDesktopZig != null;
 
     const target = resolvedInfo.target;
     const optimize = resolvedInfo.optimize;
@@ -248,7 +119,6 @@ pub fn createModulesAndLibs(
         .linkage = .static,
         .root_module = emptyMod,
     });
-    libCppForDeps.linkLibCpp();
 
     // A library that contains this library's libcpp and links all dependency libcpp's
     const actualLibCpp = b.addLibrary(.{
@@ -267,17 +137,19 @@ pub fn createModulesAndLibs(
             .target = target,
             .optimize = optimize,
         });
-        pythonMod.addImport(projectName, libzigMod);
+        if (pyModIsZig) {
+            pythonMod.addImport(projectName, libzigMod);
+        }
         pythonMod.addIncludePath(b.path(b.pathJoin(&rootSrcDirs)));
-        pythonMod.addIncludePath(.{ .cwd_relative = try optionallyConvertWinePath(
+        pythonMod.addIncludePath(.{ .cwd_relative = try wine.optionallyConvertWinePath(
             b.allocator,
             pyInfo.getIncludePath(),
-            resolvedInfo,
+            resolvedInfo.target.result.os.tag,
         ) });
-        pythonMod.addLibraryPath(.{ .cwd_relative = try optionallyConvertWinePath(
+        pythonMod.addLibraryPath(.{ .cwd_relative = try wine.optionallyConvertWinePath(
             b.allocator,
             pyInfo.getLibraryPath(),
-            resolvedInfo,
+            resolvedInfo.target.result.os.tag,
         ) });
         pythonMod.linkLibrary(actualLibCpp);
         const rootPythonDirs: [2][]const u8 = .{ rootDir, pyDir };
@@ -296,7 +168,7 @@ pub fn createModulesAndLibs(
             .target = target,
             .optimize = optimize,
         });
-        if (altDesktopZig == null) {
+        if (altDesktopZig == null and exeIsZig) {
             exeMod.addImport(projectName, libzigMod);
         }
         exeMod.addIncludePath(b.path(b.pathJoin(&rootSrcDirs)));
@@ -323,7 +195,6 @@ pub fn createModulesAndLibs(
         .linkage = .static,
         .root_module = libzigMod,
     });
-    libzig.link_gc_sections = false;
     libzig.addIncludePath(b.path("src"));
 
     // A lib for this lib's headers to be installed
@@ -381,10 +252,10 @@ pub fn createModulesAndLibs(
         //         mod.linkSystemLibrary(name, .{});
         //     }
         // } else {
-        mod.linkSystemLibrary(try optionallyConvertWinePath(
+        mod.linkSystemLibrary(try wine.optionallyConvertWinePath(
             b.allocator,
             pyInfo.getLibName(),
-            resolvedInfo,
+            resolvedInfo.target.result.os.tag,
         ), .{});
         // }
 
@@ -824,7 +695,7 @@ pub fn build(
 
     const rootDir = ".";
 
-    var pyInfo = getPythonInfo(b, null, resolvedInfo);
+    var pyInfo = Py.getPythonInfo(b, null, resolvedInfo.target.result.os.tag);
 
     // timestamp("Python resolution", &timestampStart);
 
@@ -1097,70 +968,3 @@ pub fn fileExists(
     const array: [2][]const u8 = .{ subDir, path };
     return b.path(b.pathJoin(&array));
 }
-
-/// Returns the include path for the Python.h files for building the python modules.
-/// REQUIRES python to be installed
-fn getPythonIncludePath(
-    python_exe: []const u8,
-    allocator: std.mem.Allocator,
-) ![]const u8 {
-    const includeResult = try runProcess(.{
-        .allocator = allocator,
-        .argv = &.{
-            python_exe,
-            "-c",
-            "import sysconfig; print(sysconfig.get_path('include'), end='')",
-        },
-    });
-    defer allocator.free(includeResult.stderr);
-    return includeResult.stdout;
-}
-
-/// Returns the path for the python lib to be linked into the python modules.
-/// REQUIRES python to be installed
-fn getPythonLibraryPath(
-    python_exe: []const u8,
-    allocator: std.mem.Allocator,
-) ![]const u8 {
-    const includeResult = try runProcess(.{
-        .allocator = allocator,
-        .argv = &.{
-            python_exe,
-            "-c",
-            "import sysconfig; print(sysconfig.get_config_var('LIBDIR'), end='')",
-        },
-    });
-    defer allocator.free(includeResult.stderr);
-    return includeResult.stdout;
-}
-
-/// Returns the version of the python program installed.
-/// REQUIRES python to be installed
-fn getPythonLDVersion(
-    python_exe: []const u8,
-    allocator: std.mem.Allocator,
-    targetOs: std.Target.Os.Tag,
-) ![]const u8 {
-    // yes because of course windows does something different
-    const getLdVersion = if (targetOs == .windows)
-        "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}', end='')"
-    else
-        "import sysconfig; print(sysconfig.get_config_var('LDVERSION'), end='')";
-
-    const includeResult = try runProcess(.{
-        .allocator = allocator,
-        .argv = &.{
-            python_exe,
-            "-c",
-            getLdVersion,
-        },
-    });
-    defer allocator.free(includeResult.stderr);
-    return includeResult.stdout;
-}
-
-const runProcess =
-    if (builtin.zig_version.minor >= 12)
-        std.process.Child.run
-    else
-        std.process.Child.exec;

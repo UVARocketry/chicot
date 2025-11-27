@@ -58,6 +58,13 @@ pub const BuildInfo = struct {
     pub const DependencyInfo = struct {
         importName: ?[]const u8,
         dependencyName: []const u8,
+        // // potential solution to dependency loop problem
+        // usage: ?enum {
+        //     mainrepo,
+        //     exeonly,
+        //     pyonly,
+        //     pyandexe,
+        // },
     };
 
     pub const IdType = u8;
