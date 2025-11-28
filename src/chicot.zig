@@ -26,7 +26,7 @@ pub const Modules = struct {
     libcppForDeps: *std.Build.Step.Compile,
     depLibcpps: []*std.Build.Step.Compile,
     depLibzigs: []*std.Build.Step.Compile,
-    rootTests: *std.Build.Step.Compile,
+    rootTests: ?*std.Build.Step.Compile,
     cppMod: *std.Build.Module,
     zigobject: *std.Build.Step.Compile,
     compatHeadersDir: []const u8,
@@ -386,12 +386,15 @@ pub fn createModulesAndLibs(
     libzigMod.addIncludePath(headerLib.getEmittedIncludeTree());
     // make sure zig files can see dependency headers
 
-    const rootTests = b.addTest(.{
-        .root_module = libzigMod,
-    });
-    // link in essential cpp info
-    rootTests.linkLibrary(libcpp);
-    rootTests.linkLibrary(libCppForDeps);
+    const rootTests = if (resolvedInfo.buildType == .desktop) blk: {
+        const rootTests = b.addTest(.{
+            .root_module = libzigMod,
+        });
+        // link in essential cpp info
+        rootTests.linkLibrary(libcpp);
+        rootTests.linkLibrary(libCppForDeps);
+        break :blk rootTests;
+    } else null;
 
     return .{
         .rootTests = rootTests,
@@ -743,11 +746,13 @@ pub fn build(
         // spaceCount,
     );
 
-    const runTests = b.addRunArtifact(modules.rootTests);
+    if (modules.rootTests) |rootTests| {
+        const runTests = b.addRunArtifact(rootTests);
 
-    const testStep = b.step("test", "run tests");
-    testStep.dependOn(&modules.rootTests.step);
-    testStep.dependOn(&runTests.step);
+        const testStep = b.step("test", "run tests");
+        testStep.dependOn(&rootTests.step);
+        testStep.dependOn(&runTests.step);
+    }
 
     // timestamp("Module creation", &timestampStart);
 
