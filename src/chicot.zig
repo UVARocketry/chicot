@@ -26,6 +26,7 @@ pub const Modules = struct {
     libcppForDeps: *std.Build.Step.Compile,
     depLibcpps: []*std.Build.Step.Compile,
     depLibzigs: []*std.Build.Step.Compile,
+    rootTests: *std.Build.Step.Compile,
     cppMod: *std.Build.Module,
     zigobject: *std.Build.Step.Compile,
     compatHeadersDir: []const u8,
@@ -58,7 +59,7 @@ pub fn getZigName(
     ) catch unreachable;
 }
 
-pub fn createModulesAndLibs2(
+pub fn createModulesAndLibs(
     b: *std.Build,
     zon: anytype,
     resolvedInfo: FullBuildInfo,
@@ -385,7 +386,15 @@ pub fn createModulesAndLibs2(
     libzigMod.addIncludePath(headerLib.getEmittedIncludeTree());
     // make sure zig files can see dependency headers
 
+    const rootTests = b.addTest(.{
+        .root_module = libzigMod,
+    });
+    // link in essential cpp info
+    rootTests.linkLibrary(libcpp);
+    rootTests.linkLibrary(libCppForDeps);
+
     return .{
+        .rootTests = rootTests,
         .libcpp = libcpp,
         .cppMod = cppMod,
         .libzig = libzig,
@@ -407,352 +416,6 @@ pub fn createModulesAndLibs2(
         .libcppForDeps = libCppForDeps,
     };
 }
-
-// pub fn createModulesAndLibs(
-//     b: *std.Build,
-//     resolvedInfo: FullBuildInfo,
-//     chicot: *std.Build.Dependency,
-//     rootDir: []const u8,
-//     projectName: []const u8,
-//     pyInfo: *Py.PythonInfo,
-//     // spaceCount: usize,
-// ) !Modules {
-//     const rootZig = fileExists(b, mainDir, "root.zig");
-//     const pyrootZig = fileExists(b, pyDir, "python.zig");
-//     const pyModIsZig = pyrootZig != null;
-//     const desktopZig = fileExists(b, desktopDir, "main.zig");
-//     const altDesktopZig = fileExists(b, mainDir, "main.zig");
-//     const exeIsZig = desktopZig != null or altDesktopZig != null;
-//
-//     const target = resolvedInfo.target;
-//     const optimize = resolvedInfo.optimize;
-//     const cppInfo = resolvedInfo.buildInfo.cpp;
-//
-//     const writeStep = b.addWriteFiles();
-//     const emptyFile = writeStep.add(
-//         "headerroot.zig",
-//         "pub fn donotusethisfunction() void {}",
-//     );
-//
-//     // An empty module to replace some modules lowkey
-//     const emptyMod = b.createModule(.{
-//         .target = target,
-//         .optimize = optimize,
-//         .root_source_file = emptyFile,
-//     });
-//
-//     // The module from root.zig
-//     const libzigMod = blk: {
-//         const info: std.Build.Module.CreateOptions = if (resolvedInfo.buildType == .teensy41) .{
-//             .root_source_file = rootZig orelse emptyFile,
-//             .target = target,
-//             .optimize = optimize,
-//             // these all shrink down the exe size
-//             .error_tracing = false,
-//             .omit_frame_pointer = true,
-//             // .strip = true,
-//             .stack_check = false,
-//             .stack_protector = false,
-//             .single_threaded = true,
-//             // this is ABSOLUTELY NECESSARY, otherwise linking will fail (i think)
-//             .unwind_tables = .none,
-//         } else .{
-//             .root_source_file = rootZig orelse emptyFile,
-//             .target = target,
-//             .optimize = optimize,
-//         };
-//         break :blk b.addModule(projectName, info);
-//     };
-//
-//     const rootSrcDirs: [2][]const u8 = .{ rootDir, mainDir };
-//
-//     // The module that contains all cpp files inside src/
-//     const cppMod = b.addModule("root", .{
-//         .target = target,
-//         .optimize = optimize,
-//         .root_source_file = emptyFile,
-//     });
-//     if (dirExists(b, b.pathJoin(&rootSrcDirs))) {
-//         try addCppFiles(b, cppMod, b.pathJoin(&rootSrcDirs), cppInfo.otherFlags);
-//         resolveCppInfo(b, cppMod, cppInfo);
-//         resolveCppInfo(b, libzigMod, cppInfo);
-//     }
-//
-//     // A library that links in all the libcpp's from sub dependencies
-//     const libCppForDeps = b.addLibrary(.{
-//         .name = "cpp",
-//         .linkage = .static,
-//         .root_module = emptyMod,
-//     });
-//
-//     // A library that contains this library's libcpp and links all dependency libcpp's
-//     const actualLibCpp = b.addLibrary(.{
-//         .name = "cpp",
-//         .linkage = .static,
-//         .root_module = cppMod,
-//     });
-//     actualLibCpp.linkLibCpp();
-//     actualLibCpp.linkLibrary(libCppForDeps);
-//
-//     // A module that contains the python/* and also compiles python/python.zig if
-//     // it exists
-//     const pythonMod = if (dirExists(b, pyDir) and resolvedInfo.buildEverything) blk: {
-//         const pythonMod = b.addModule("python", .{
-//             .root_source_file = pyrootZig,
-//             .target = target,
-//             .optimize = optimize,
-//         });
-//         if (pyModIsZig) {
-//             pythonMod.addImport(projectName, libzigMod);
-//         }
-//         pythonMod.addIncludePath(b.path(b.pathJoin(&rootSrcDirs)));
-//         pythonMod.addIncludePath(.{ .cwd_relative = try wine.optionallyConvertWinePath(
-//             b.allocator,
-//             pyInfo.getIncludePath(),
-//             resolvedInfo.target.result.os.tag,
-//         ) });
-//         pythonMod.addLibraryPath(.{ .cwd_relative = try wine.optionallyConvertWinePath(
-//             b.allocator,
-//             pyInfo.getLibraryPath(),
-//             resolvedInfo.target.result.os.tag,
-//         ) });
-//         pythonMod.linkLibrary(actualLibCpp);
-//         const rootPythonDirs: [2][]const u8 = .{ rootDir, pyDir };
-//         recursivelyAddIncludeDirs(b, pythonMod, b.pathJoin(&rootPythonDirs));
-//         try addCppFiles(b, pythonMod, b.pathJoin(&rootPythonDirs), cppInfo.otherFlags);
-//         // try addCppFiles(b, pythonMod, b.pathJoin(&rootSrcDirs), cppInfo.otherFlags);
-//         resolveCppInfo(b, pythonMod, cppInfo);
-//         break :blk pythonMod;
-//     } else null;
-//
-//     // A module that contains the desktop/* and also compiles desktop/main.zig if
-//     // it exists
-//     const exeMod = if (dirExists(b, desktopDir) and resolvedInfo.buildEverything) blk: {
-//         const exeMod = b.addModule("main", .{
-//             .root_source_file = desktopZig orelse altDesktopZig,
-//             .target = target,
-//             .optimize = optimize,
-//         });
-//         if (altDesktopZig == null and exeIsZig) {
-//             exeMod.addImport(projectName, libzigMod);
-//         }
-//         exeMod.addIncludePath(b.path(b.pathJoin(&rootSrcDirs)));
-//         exeMod.linkLibrary(actualLibCpp);
-//         const rootDesktopDirs: [2][]const u8 = .{ rootDir, desktopDir };
-//         recursivelyAddIncludeDirs(b, exeMod, b.pathJoin(&rootDesktopDirs));
-//         try addCppFiles(b, exeMod, b.pathJoin(&rootDesktopDirs), cppInfo.otherFlags);
-//         // try addCppFiles(b, exeMod, b.pathJoin(&rootSrcDirs), cppInfo.otherFlags);
-//         resolveCppInfo(b, exeMod, cppInfo);
-//
-//         break :blk exeMod;
-//     } else null;
-//
-//     // An object that builds libzigMod if it exists
-//     const zigObj = b.addObject(.{
-//         .name = "zig",
-//         .root_module = libzigMod,
-//     });
-//
-//     // A library that builds this zigobj AND all dep zigobj's
-//     // into one library
-//     const libzig = b.addLibrary(.{
-//         .name = "zig",
-//         .linkage = .static,
-//         .root_module = libzigMod,
-//     });
-//     libzig.addIncludePath(b.path("src"));
-//
-//     // A lib for this lib's headers to be installed
-//     const headerLib = b.addLibrary(.{
-//         .name = "headers",
-//         .linkage = .static,
-//         .root_module = emptyMod,
-//     });
-//     cppMod.linkLibrary(headerLib);
-//     recursivelyAddHeaderDirs(b, headerLib, mainDir, "");
-//     for (resolvedInfo.buildInfo.installHeaders) |installDir| {
-//         recursivelyAddHeaderDirs(b, headerLib, installDir.fromDir, installDir.toDir);
-//     }
-//
-//     // a lib for all dep's headers to be installed
-//     const depHeadersDir = "depheaders";
-//     const depHeaderLib = b.addLibrary(.{
-//         .name = depHeadersDir,
-//         .linkage = .static,
-//         .root_module = emptyMod,
-//     });
-//
-//     // this makes it so that gd on an @cInclude on a c header path inside the current
-//     // project jumps to a file inside the current project *NOT* somewhere in the cache
-//     libzigMod.addIncludePath(headerLib.getEmittedIncludeTree());
-//     // make sure zig files can see dependency headers
-//     libzigMod.addIncludePath(depHeaderLib.getEmittedIncludeTree());
-//
-//     const lib = b.addLibrary(.{
-//         .name = projectName,
-//         .linkage = .static,
-//         .root_module = libzigMod,
-//     });
-//     lib.linkLibCpp();
-//
-//     // the python library
-//     const python = if (pythonMod) |mod| blk: {
-//         const python = b.addLibrary(.{
-//             .name = "python",
-//             .linkage = .dynamic,
-//             .root_module = mod,
-//         });
-//         python.linkLibCpp();
-//         python.linkLibrary(libCppForDeps);
-//
-//         // if (builtin.os.tag == .linux and
-//         //     resolvedInfo.target.result.os.tag == .windows)
-//         // {
-//         //     const name = pyInfo.getLibName();
-//         //     std.debug.print("Cross compiling to windows {s}\n", .{name});
-//         //     if (std.mem.startsWith(u8, name, "C:/")) {
-//         //         const newName = convertWinePathToLinuxPath(b.allocator, name);
-//         //         mod.linkSystemLibrary(newName, .{});
-//         //     } else {
-//         //         mod.linkSystemLibrary(name, .{});
-//         //     }
-//         // } else {
-//         mod.linkSystemLibrary(try wine.optionallyConvertWinePath(
-//             b.allocator,
-//             pyInfo.getLibName(),
-//             resolvedInfo.target.result.os.tag,
-//         ), .{});
-//         // }
-//
-//         break :blk python;
-//     } else null;
-//
-//     // the exe
-//     const exe = if (exeMod) |mod| blk: {
-//         const exe = b.addExecutable(.{
-//             .name = projectName,
-//             .root_module = mod,
-//         });
-//         exe.linkLibrary(libCppForDeps);
-//         exe.linkLibCpp();
-//         exe.linkLibrary(libzig);
-//         break :blk exe;
-//     } else null;
-//
-//     actualLibCpp.linkLibrary(depHeaderLib);
-//     cppMod.linkLibrary(depHeaderLib);
-//
-//     var libCpps: std.ArrayList(*std.Build.Step.Compile) = .empty;
-//
-//     for (resolvedInfo.buildInfo.dependencies) |depInfo| {
-//         var rootFlags: []const []const u8 = undefined;
-//         var parentFlags: []const []const u8 = undefined;
-//         if (resolvedInfo.rootFlags) |r| {
-//             rootFlags = r;
-//             parentFlags = resolvedInfo.currentFlags;
-//         } else {
-//             rootFlags = resolvedInfo.currentFlags;
-//             parentFlags = &.{};
-//         }
-//         // std.debug.print("Loading dep {s} for {s}\n", .{ depInfo.dependencyName, projectName });
-//         const dep = b.dependency(depInfo.dependencyName, .{
-//             .mode = @tagName(resolvedInfo.buildType),
-//             .__flagsFromRoot = rootFlags,
-//             .dontBuildEverything = true,
-//             // .__spaceCount = spaceCount + 2,
-//             .__flagsFromParent = parentFlags,
-//             .target = target,
-//             .optimize = optimize,
-//         });
-//
-//         const depLibZigMod = dep.module(depInfo.dependencyName);
-//         const depLibCpp =
-//             if (resolvedInfo.buildType == .desktop) blk: {
-//                 const l = dep.artifact("cpp");
-//                 try libCpps.append(b.allocator, l);
-//                 break :blk l;
-//             } else null;
-//
-//         // OK so... FOR SOME REASON, when we are building for platformio,
-//         // we have to link all objects together and stuff,
-//         // but when we are building for python modules, it is better to link
-//         // in libzig
-//         const depLibZigObj =
-//             if (resolvedInfo.buildType == .teensy41)
-//                 dep.namedLazyPath("obj/zig.o")
-//             else
-//                 null;
-//
-//         const depLibZig =
-//             if (resolvedInfo.buildType == .desktop)
-//                 dep.artifact("zig")
-//             else
-//                 null;
-//         const headers = dep.artifact("headers");
-//         const depsDepHeaders = dep.artifact("depheaders");
-//
-//         const headersTree = headers.getEmittedIncludeTree();
-//
-//         actualLibCpp.addIncludePath(headersTree);
-//         cppMod.addIncludePath(headersTree);
-//
-//         if (pythonMod) |mod| {
-//             mod.addImport(depInfo.importName orelse depInfo.dependencyName, depLibZigMod);
-//             mod.addIncludePath(headersTree);
-//             mod.linkLibrary(depLibCpp.?);
-//             // python.?.linkLibrary(depLibCpp.?);
-//         }
-//
-//         if (exeMod) |mod| {
-//             // mod.addImport(depInfo.importName orelse depInfo.dependencyName, depLibZigMod);
-//             mod.addIncludePath(headersTree);
-//             mod.linkLibrary(depLibCpp.?);
-//         }
-//         depHeaderLib.installHeadersDirectory(headersTree, depHeadersDir, .{
-//             .include_extensions = headerExtensions,
-//             .exclude_extensions = headerExcludeExtensions,
-//         });
-//         depHeaderLib.installHeadersDirectory(
-//             depsDepHeaders.getEmittedIncludeTree(),
-//             "",
-//             .{
-//                 .include_extensions = headerExtensions,
-//                 .exclude_extensions = headerExcludeExtensions,
-//             },
-//         );
-//
-//         libzigMod.addImport(
-//             depInfo.importName orelse depInfo.dependencyName,
-//             depLibZigMod,
-//         );
-//         // std.debug.print("Adding object and stuff for {s}!\n", .{depInfo.dependencyName});
-//         if (depLibZigObj) |d| {
-//             libzig.addObjectFile(d);
-//         }
-//         if (depLibZig) |d| {
-//             libzig.linkLibrary(d);
-//         }
-//     }
-//     return .{
-//         .libcpp = actualLibCpp,
-//         .cppMod = cppMod,
-//         .libzig = libzig,
-//         .compatHeadersDir = compatHeadersDir,
-//         .depHeadersDir = depHeadersDir,
-//         .platformioClangdCompatHeaders = chicot.artifact(compatHeadersDir),
-//         .lib = lib,
-//         .headerLib = headerLib,
-//         .depHeaderLib = depHeaderLib,
-//         .python = python,
-//         .exe = exe,
-//         .pythonMod = pythonMod,
-//         .exeMod = exeMod,
-//         .depLibcpp = libCpps.items,
-//         // .rootMod = rootMod,
-//         .libzigMod = libzigMod,
-//         .zigobject = zigObj,
-//     };
-// }
 
 pub fn recursivelyAddIncludeDirs(
     b: *std.Build,
@@ -1069,7 +732,7 @@ pub fn build(
         "Whether to diff the generated platformio.ini with the current platformio.ini script",
     ) orelse false;
 
-    const modules = try createModulesAndLibs2(
+    const modules = try createModulesAndLibs(
         b,
         zon,
         resolvedInfo,
@@ -1079,6 +742,12 @@ pub fn build(
         &pyInfo,
         // spaceCount,
     );
+
+    const runTests = b.addRunArtifact(modules.rootTests);
+
+    const testStep = b.step("test", "run tests");
+    testStep.dependOn(&modules.rootTests.step);
+    testStep.dependOn(&runTests.step);
 
     // timestamp("Module creation", &timestampStart);
 
