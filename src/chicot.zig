@@ -60,6 +60,7 @@ pub fn getZigName(
 
 pub fn createModulesAndLibs2(
     b: *std.Build,
+    zon: anytype,
     resolvedInfo: FullBuildInfo,
     chicot: *std.Build.Dependency,
     rootDir: []const u8,
@@ -238,9 +239,7 @@ pub fn createModulesAndLibs2(
 
     // this makes it so that gd on an @cInclude on a c header path inside the current
     // project jumps to a file inside the current project *NOT* somewhere in the cache
-    libzigMod.addIncludePath(headerLib.getEmittedIncludeTree());
-    // make sure zig files can see dependency headers
-    libzigMod.addIncludePath(depHeaderLib.getEmittedIncludeTree());
+    libzigMod.addIncludePath(b.path("src"));
 
     const lib = b.addLibrary(.{
         .name = projectName,
@@ -329,6 +328,16 @@ pub fn createModulesAndLibs2(
         const depsDepHeaders = dep.artifact("depheaders");
 
         const headersTree = headers.getEmittedIncludeTree();
+        inline for (@typeInfo(@TypeOf(zon.dependencies)).@"struct".fields) |field| {
+            const val = @field(zon.dependencies, field.name);
+            if (std.mem.eql(u8, field.name, depInfo.dependencyName)) {
+                if (@hasField(@TypeOf(val), "path")) {
+                    libzigMod.addIncludePath(b.path(b.pathJoin(&.{ val.path, "src" })));
+                } else {
+                    libzigMod.addIncludePath(headersTree);
+                }
+            }
+        }
 
         // actualLibCpp.addIncludePath(headersTree);
         cppMod.addIncludePath(headersTree);
@@ -357,6 +366,7 @@ pub fn createModulesAndLibs2(
                 .exclude_extensions = headerExcludeExtensions,
             },
         );
+        libzigMod.addIncludePath(depsDepHeaders.getEmittedIncludeTree());
 
         libzigMod.addImport(
             depInfo.importName orelse depInfo.dependencyName,
@@ -370,6 +380,11 @@ pub fn createModulesAndLibs2(
             libzig.linkLibrary(d);
         }
     }
+
+    // make sure libzig has the correct headers for everything
+    libzigMod.addIncludePath(headerLib.getEmittedIncludeTree());
+    // make sure zig files can see dependency headers
+
     return .{
         .libcpp = libcpp,
         .cppMod = cppMod,
@@ -1056,6 +1071,7 @@ pub fn build(
 
     const modules = try createModulesAndLibs2(
         b,
+        zon,
         resolvedInfo,
         chicot,
         rootDir,
