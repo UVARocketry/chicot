@@ -228,6 +228,11 @@ pub fn main() !void {
     // std.debug.print("{s}\n", .{compatHeaders});
     const compileFlags = argIterator.next() orelse "./zig-out/ogaboogaflags.txt";
 
+    const pioIni = std.fs.cwd().openFile("platformio.ini", .{
+        .mode = .read_only,
+    }) catch @panic("\x1b[31mPio lsp step requires having a platformio.ini file inside this directory! To generate it, run `zig build pio -p . -Dmode=...`\x1b[0m");
+    pioIni.close();
+
     if (val.get(mode).platformio == null) {
         std.debug.print("ERROR: build mode {s} does not have a platformio output type!\n", .{mode});
         return error.ModeNotAllowed;

@@ -180,7 +180,8 @@ pub fn main() !void {
 
                         const parent = try dir.openDir("..", .{});
                         const newPath = try parent.realpathAlloc(allocator, ".");
-                        const libPathName = try std.fs.cwd().realpathAlloc(allocator, "lib");
+                        const libPathName =
+                            std.fs.cwd().realpathAlloc(allocator, "lib") catch "";
                         // std.debug.print("{s} {s}\n", .{ newPath, libPathName });
                         if (std.mem.eql(u8, newPath, libPathName)) {
                             try outIow.print("{s}", .{
