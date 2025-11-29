@@ -232,7 +232,7 @@ pub fn main() !void {
             for (cppInfo.otherFlags) |inc| {
                 try outIow.print(" {s}", .{inc});
             }
-            try outIow.print(" -Lzig-out/lib -lzig", .{});
+            try outIow.print(" -Lzig-out/lib -lzig-{s}", .{@tagName(zon.name)});
 
             try outIow.print(" -Izig-out/include -Izig-out/include/depheaders", .{});
             try outIow.print("\n", .{});
