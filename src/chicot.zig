@@ -12,6 +12,7 @@ const inherit = @import("helpers/inherit.zig");
 const ZonType = buildInfo.ZonType;
 const BuildDefaults = buildInfo.BuildDefaults;
 const BuildInfo = buildInfo.BuildInfo;
+const CppInfo = buildInfo.CppInfo;
 
 pub const version = "0.0.0";
 
@@ -735,6 +736,8 @@ pub fn build(
         "Whether to diff the generated platformio.ini with the current platformio.ini script",
     ) orelse false;
 
+    const helpers = chicot.module("helpers");
+
     const modules = try createModulesAndLibs(
         b,
         zon,
@@ -745,6 +748,25 @@ pub fn build(
         &pyInfo,
         // spaceCount,
     );
+
+    const emittedHeader = try steps.addHeaderGen(
+        b,
+        chicot,
+        helpers,
+        modules.libzigMod,
+        resolvedInfo.selectedMode,
+        b.install_prefix,
+    );
+    const headerGenStep = b.step(
+        "header",
+        "Emit a C/C++ header that exports all the symbols in the src/root.zig file",
+    );
+    const inst = b.addInstallFile(emittedHeader, try std.fmt.allocPrint(
+        b.allocator,
+        "zigheader.h",
+        .{},
+    ));
+    headerGenStep.dependOn(&inst.step);
 
     if (modules.rootTests) |rootTests| {
         const runTests = b.addRunArtifact(rootTests);
@@ -780,8 +802,6 @@ pub fn build(
         // std.debug.print("found pio at {s}!\n", .{pio});
         break :blk pio;
     };
-
-    const helpers = chicot.module("helpers");
 
     try steps.addLibraryJsonStep(b, chicot, helpers);
 
@@ -945,7 +965,7 @@ pub fn build(
 pub fn resolveCppInfo(
     b: *std.Build,
     lib: *std.Build.Module,
-    info: BuildInfo.CppInfo,
+    info: CppInfo,
 ) void {
     for (info.include) |inc| {
         lib.addIncludePath(b.path(inc));

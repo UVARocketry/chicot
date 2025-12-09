@@ -23,6 +23,41 @@ pub fn getFileContents(
     }
     return buf;
 }
+
+pub fn addHeaderGen(
+    b: *std.Build,
+    chicot: *std.Build.Dependency,
+    helpers: *std.Build.Module,
+    libzigMod: *std.Build.Module,
+    mode: []const u8,
+    buildPrefix: []const u8,
+) !std.Build.LazyPath {
+    const headergenMod = b.addModule("headergen", .{
+        .root_source_file = chicot.path("src/helpers/generators/headers.zig"),
+        .optimize = .Debug,
+        .target = b.graph.host,
+    });
+    headergenMod.addImport("helpers", helpers);
+    headergenMod.addImport("mod", libzigMod);
+    headergenMod.addAnonymousImport("zon", .{
+        .root_source_file = b.path("build.zig.zon"),
+    });
+
+    const headergenProg = b.addExecutable(.{
+        .name = "headergen",
+        .root_module = headergenMod,
+    });
+
+    // b.installArtifact(pioIniProgram);
+    const runHeadergen = b.addRunArtifact(headergenProg);
+
+    const headerOut = runHeadergen.addOutputFileArg("zig.h");
+    runHeadergen.addArg(mode);
+    runHeadergen.addArg(buildPrefix);
+
+    return headerOut;
+}
+
 pub fn addLibraryJsonStep(
     b: *std.Build,
     chicot: *std.Build.Dependency,

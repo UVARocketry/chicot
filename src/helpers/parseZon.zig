@@ -260,6 +260,10 @@ pub fn parseIntoType(allocator: std.mem.Allocator, T: type, val: *T, newVal: any
             parseIntoEnum(T, val, newVal, currentField);
             return;
         }
+        if (tInfo == .@"union") {
+            parseIntoUnion(allocator, T, val, newVal, currentField);
+            return;
+        }
         // if we couldnt parse, then throw a compile error
         @compileLog(std.fmt.comptimePrint("zon info: {}", .{@typeInfo(T2)}));
         @compileLog(std.fmt.comptimePrint("expected info: {}", .{@typeInfo(T)}));
@@ -351,6 +355,40 @@ pub fn defaultPtr(T: type, comptime fieldName: []const u8) ?@FieldType(T, fieldN
         }
     };
     return null;
+}
+
+pub fn parseIntoUnion(
+    allocator: std.mem.Allocator,
+    T: type,
+    val: *T,
+    newVal: anytype,
+    comptime currentField: []const u8,
+) void {
+    const info = @typeInfo(@TypeOf(newVal)).@"struct";
+
+    comptime var i = 0;
+    if (info.fields.len != 1) {
+        @compileError(std.fmt.comptimePrint("Expected only one field passed in zon type at {s} while setting union type {}, instead got {}\n", .{ currentField, T, info.fields.len }));
+    }
+    inline for (info.fields) |field| {
+        const fname = field.name;
+        if (@hasField(T, fname)) {
+            const ExpectingType = @FieldType(T, field.name);
+            var container: ExpectingType = undefined;
+            parseIntoType(
+                allocator,
+                ExpectingType,
+                &container,
+                @field(newVal, field.name),
+                currentField ++ "." ++ field.name,
+            );
+            val.* = @unionInit(T, fname, container);
+            break;
+        }
+        i += 1;
+    } else {
+        @compileError(std.fmt.comptimePrint("Field '{s}' is not contained in union type {}, but is in passed zon type (while setting {s})\n", .{ info.fields[i], T, currentField }));
+    }
 }
 
 /// Parses the zon value {newVal} into the struct {val}
