@@ -101,7 +101,7 @@ pub fn createModulesAndLibs(
             .optimize = optimize,
             // these all shrink down the exe size
             .error_tracing = false,
-            .omit_frame_pointer = true,
+            .omit_frame_pointer = false,
             // .strip = true,
             .stack_check = false,
             .stack_protector = false,
