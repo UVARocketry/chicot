@@ -30,7 +30,10 @@ pub fn cleanTypeName(T: type, alloc: std.mem.Allocator) ![]const u8 {
             defer writer.deinit();
             const child = try cleanTypeName(v.child, alloc);
             // defer alloc.free(child);
-            try writer.writer.print("{s}*", .{child});
+            try writer.writer.print("{s}{s}*", .{
+                if (v.is_const) "const " else "",
+                child,
+            });
             return try writer.toOwnedSlice();
         },
         else => {
