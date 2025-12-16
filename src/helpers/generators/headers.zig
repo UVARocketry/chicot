@@ -28,6 +28,12 @@ pub fn cleanTypeName(T: type, alloc: std.mem.Allocator) ![]const u8 {
         .pointer => |v| {
             var writer: std.Io.Writer.Allocating = .init(alloc);
             defer writer.deinit();
+            if (v.child == anyopaque) {
+                try writer.writer.print("{s}void*", .{
+                    if (v.is_const) "const " else "",
+                });
+                return try writer.toOwnedSlice();
+            }
             const child = try cleanTypeName(v.child, alloc);
             // defer alloc.free(child);
             try writer.writer.print("{s}{s}*", .{
@@ -35,6 +41,10 @@ pub fn cleanTypeName(T: type, alloc: std.mem.Allocator) ![]const u8 {
                 child,
             });
             return try writer.toOwnedSlice();
+        },
+        .optional => |v| {
+            std.debug.assert(@typeInfo(v.child) == .pointer);
+            return try cleanTypeName(v.child, alloc);
         },
         else => {
             const name = @typeName(T);
@@ -156,7 +166,8 @@ pub fn writeFn(
                 try resolveInfoFor(param.type.?, alloc, writer, resolvedTypes);
             }
 
-            try writer.print("{} ", .{fun.return_type.?});
+            const ret = try cleanTypeName(fun.return_type.?, alloc);
+            try writer.print("{s} ", .{ret});
             try writer.print("{s}", .{name});
             try writer.writeAll("(");
             inline for (fun.params, 0..) |param, i| {
