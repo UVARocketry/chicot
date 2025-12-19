@@ -15,8 +15,9 @@ env = DefaultEnvironment()
 
 mode = env["PIOENV"]
 
+# cant use ReleaseSmall bc it messes with stack trace info
 p1 = subprocess.Popen(
-    ["zig", "build", "-Doptimize=ReleaseSmall", "-Dmode=" + mode],
+    ["zig", "build", "-Doptimize=ReleaseFast", "-Dmode=" + mode],
     shell=False,
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE,
