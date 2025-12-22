@@ -22,6 +22,7 @@ pub const pyDir = "python";
 
 pub const Modules = struct {
     libzig: *std.Build.Step.Compile,
+    check: ?*std.Build.Step = null,
     libzigMod: *std.Build.Module,
     libcpp: *std.Build.Step.Compile,
     libcppForDeps: *std.Build.Step.Compile,
@@ -738,7 +739,7 @@ pub fn build(
 
     const helpers = chicot.module("helpers");
 
-    const modules = try createModulesAndLibs(
+    var modules = try createModulesAndLibs(
         b,
         zon,
         resolvedInfo,
@@ -833,6 +834,7 @@ pub fn build(
     // timestamp("Step creation", &timestampStart);
 
     const check = b.step("check", "Check if foo compiles");
+    modules.check = check;
 
     const outputTypes = resolvedInfo.buildInfo.outputTypes;
 
