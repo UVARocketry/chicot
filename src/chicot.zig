@@ -153,7 +153,7 @@ pub fn createModulesAndLibs(
 
     // A module that contains the python/* and also compiles python/python.zig if
     // it exists
-    const pythonMod = if (dirExists(b, pyDir) and resolvedInfo.buildEverything) blk: {
+    const pythonMod = if (dirExists(b, pyDir) and resolvedInfo.buildEverything and resolvedInfo.buildType == .desktop) blk: {
         const pythonMod = b.addModule("python", .{
             .root_source_file = pyrootZig,
             .target = target,
@@ -191,7 +191,7 @@ pub fn createModulesAndLibs(
 
     // A module that contains the desktop/* and also compiles desktop/main.zig if
     // it exists
-    const exeMod = if (dirExists(b, desktopDir) and resolvedInfo.buildEverything) blk: {
+    const exeMod = if (dirExists(b, desktopDir) and resolvedInfo.buildEverything and resolvedInfo.buildType == .desktop) blk: {
         const exeMod = b.addModule("main", .{
             .root_source_file = desktopZig orelse altDesktopZig,
             .target = target,
