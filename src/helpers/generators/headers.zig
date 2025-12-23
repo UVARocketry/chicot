@@ -98,11 +98,32 @@ pub fn resolveInfoFor(
                 return;
             }
             try markTypeDefined(T, alloc, resolvedTypes);
-            try writer.print("typedef enum\n#ifdef __cplusplus\n    class\n#endif\n    {s} {{\n", .{cleanName});
+            const backingName = try cleanTypeName(e.tag_type, alloc);
+            try writer.print(
+                \\#ifdef __cplusplus
+                \\enum {s} : {s} {{
+                \\
+            , .{ cleanName, backingName });
             inline for (e.fields) |f| {
-                try writer.print("        {s} = {},\n", .{ f.name, f.value });
+                try writer.print("    {s} = {},\n", .{
+                    f.name,
+                    f.value,
+                });
             }
-            try writer.print("    }} {s};\n\n", .{cleanName});
+            try writer.print(
+                \\}};
+                \\#else
+                \\typedef enum {s} : {s} {{
+                \\
+            , .{ cleanName, backingName });
+            inline for (e.fields) |f| {
+                try writer.print("    {s}_{s} = {},\n", .{
+                    cleanName,
+                    f.name,
+                    f.value,
+                });
+            }
+            try writer.print("}} {s};\n#endif\n\n", .{cleanName});
         },
         .@"struct" => |s| {
             const cleanName = try cleanTypeName(T, alloc);
