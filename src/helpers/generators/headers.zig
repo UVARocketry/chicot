@@ -65,6 +65,9 @@ pub fn cleanTypeName(T: type, alloc: std.mem.Allocator) ![]const u8 {
             if (std.mem.startsWith(u8, actual, un)) {
                 actual = actual[un.len..];
             }
+            if (actual[actual.len - 1] == ')') {
+                actual = actual[0 .. actual.len - 1];
+            }
             return try alloc.dupe(u8, actual);
         },
     }
@@ -87,8 +90,23 @@ pub fn resolveInfoFor(
     resolvedTypes: *std.hash_map.StringHashMap(bool),
 ) !void {
     switch (@typeInfo(T)) {
+        .@"enum" => |e| {
+            const cleanName = try cleanTypeName(T, alloc);
+            // @compileLog(cleanName);
+            // defer alloc.free(cleanName);
+            if (resolvedTypes.contains(cleanName)) {
+                return;
+            }
+            try markTypeDefined(T, alloc, resolvedTypes);
+            try writer.print("typedef enum\n#ifdef __cplusplus\n    class\n#endif\n    {s} {{\n", .{cleanName});
+            inline for (e.fields) |f| {
+                try writer.print("        {s} = {},\n", .{ f.name, f.value });
+            }
+            try writer.print("    }} {s};\n\n", .{cleanName});
+        },
         .@"struct" => |s| {
             const cleanName = try cleanTypeName(T, alloc);
+            // @compileLog(cleanName);
             // defer alloc.free(cleanName);
             if (resolvedTypes.contains(cleanName)) {
                 return;
@@ -97,11 +115,12 @@ pub fn resolveInfoFor(
             inline for (s.fields) |f| {
                 try resolveInfoFor(f.type, alloc, writer, resolvedTypes);
             }
-            try writer.print("typedef struct {s} {{\n", .{cleanName});
+            const packedName = if (s.layout == .@"packed") "__attribute__((packed)) " else "";
+            try writer.print("typedef struct {s}{s} {{\n", .{ packedName, cleanName });
             inline for (s.fields) |f| {
                 const typeName = try cleanTypeName(f.type, alloc);
                 // defer alloc.free(typeName);
-                try writer.print("  {s} {s};\n", .{ typeName, f.name });
+                try writer.print("    {s} {s};\n", .{ typeName, f.name });
             }
             try writer.print("}} {s};\n\n", .{cleanName});
         },
@@ -165,6 +184,7 @@ pub fn writeFn(
             inline for (fun.params) |param| {
                 try resolveInfoFor(param.type.?, alloc, writer, resolvedTypes);
             }
+            try resolveInfoFor(fun.return_type.?, alloc, writer, resolvedTypes);
 
             const ret = try cleanTypeName(fun.return_type.?, alloc);
             try writer.print("{s} ", .{ret});
@@ -266,7 +286,6 @@ pub fn main() !void {
     }
 
     try iow.writeAll(
-        \\
         \\#ifdef __cplusplus
         \\}
         \\#endif // __cplusplus
