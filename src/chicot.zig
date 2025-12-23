@@ -703,15 +703,15 @@ pub fn build(
     // defer std.debug.print("}}\n", .{});
     // const spaceCount = b.option(u8, "__spaceCount", "ooga") orelse 0;
     const start = std.time.microTimestamp();
-    // _ = start;
+    _ = start;
     const timestampStart = std.time.microTimestamp();
     _ = timestampStart;
     defer {
         const end = std.time.microTimestamp();
-        // _ = end;
+        _ = end;
         // timestamp("Install", &timestampStart);
         // printSpaces(spaceCount);
-        std.debug.print("Resolution time: {}ms\n", .{@divFloor(end - start, 1000)});
+        // std.debug.print("Resolution time: {}ms\n", .{@divFloor(end - start, 1000)});
     }
     const projectName = @tagName(zon.name);
     // printSpaces(spaceCount);
