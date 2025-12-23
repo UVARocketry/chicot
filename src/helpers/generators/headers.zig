@@ -173,6 +173,9 @@ pub fn resolveInfoFor(
 
 pub fn abiCompatible(T: type) bool {
     switch (@typeInfo(T)) {
+        .@"struct" => |v| {
+            return v.layout == .@"extern";
+        },
         .pointer => |v| {
             if (v.size == .slice) {
                 return false;
@@ -186,7 +189,9 @@ pub fn abiCompatible(T: type) bool {
             }
             return true;
         },
-        else => unreachable,
+        else => {
+            @compileError(std.fmt.comptimePrint("Type {} is not abi compatible!", .{T}));
+        },
     }
 }
 
