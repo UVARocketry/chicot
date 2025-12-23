@@ -115,6 +115,7 @@ pub fn resolveInfoFor(
             inline for (s.fields) |f| {
                 try resolveInfoFor(f.type, alloc, writer, resolvedTypes);
             }
+            // TODO: packed structs are bad
             const packedName = if (s.layout == .@"packed") "__attribute__((packed)) " else "";
             try writer.print("typedef struct {s}{s} {{\n", .{ packedName, cleanName });
             inline for (s.fields) |f| {
