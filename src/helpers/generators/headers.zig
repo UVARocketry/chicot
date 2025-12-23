@@ -101,7 +101,7 @@ pub fn resolveInfoFor(
             const backingName = try cleanTypeName(e.tag_type, alloc);
             try writer.print(
                 \\#ifdef __cplusplus
-                \\enum {s} : {s} {{
+                \\enum class {s} : {s} {{
                 \\
             , .{ cleanName, backingName });
             inline for (e.fields) |f| {
