@@ -25,6 +25,25 @@ pub fn cleanTypeName(T: type, alloc: std.mem.Allocator) ![]const u8 {
                 return try alloc.dupe(u8, "double");
             } else unreachable;
         },
+        .@"fn" => |f| {
+            var writer: std.Io.Writer.Allocating = .init(alloc);
+            defer writer.deinit();
+
+            const retTyp = try cleanTypeName(f.return_type.?, alloc);
+
+            try writer.writer.print("{s} (*)(", .{retTyp});
+
+            inline for (f.params, 0..) |p, i| {
+                const param = try cleanTypeName(p.type.?, alloc);
+                try writer.writer.writeAll(param);
+                if (i != f.params.len - 1) {
+                    try writer.writer.writeAll(", ");
+                }
+            }
+            try writer.writer.writeAll(")");
+
+            return try writer.toOwnedSlice();
+        },
         .pointer => |v| {
             var writer: std.Io.Writer.Allocating = .init(alloc);
             defer writer.deinit();
@@ -35,10 +54,12 @@ pub fn cleanTypeName(T: type, alloc: std.mem.Allocator) ![]const u8 {
                 return try writer.toOwnedSlice();
             }
             const child = try cleanTypeName(v.child, alloc);
+            const isFn = @typeInfo(v.child) == .@"fn";
             // defer alloc.free(child);
-            try writer.writer.print("{s}{s}*", .{
-                if (v.is_const) "const " else "",
+            try writer.writer.print("{s}{s}{s}", .{
+                if (isFn) "" else if (v.is_const) "const " else "",
                 child,
+                if (isFn) "" else "*",
             });
             return try writer.toOwnedSlice();
         },
@@ -145,6 +166,12 @@ pub fn resolveInfoFor(
                 try writer.print("    {s} {s};\n", .{ typeName, f.name });
             }
             try writer.print("}} {s};\n\n", .{cleanName});
+        },
+        .@"fn" => |f| {
+            inline for (f.params) |param| {
+                try resolveInfoFor(param.type.?, alloc, writer, resolvedTypes);
+            }
+            try resolveInfoFor(f.return_type.?, alloc, writer, resolvedTypes);
         },
         .@"union" => |u| {
             const cleanName = try cleanTypeName(T, alloc);
