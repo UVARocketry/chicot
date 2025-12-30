@@ -197,7 +197,10 @@ pub const CppInfo = struct {
             if (parseDefine(flag)) |define| {
                 if (overrideable != null) {
                     if (self.define == null) {
-                        diagnostic.* = flag;
+                        diagnostic.* = try std.fmt.allocPrint(alloc,
+                            \\{s}
+                            \\
+                        , .{flag});
                         return error.OverrideableDefineFlagNotFound;
                     }
                     if (!self.define.?.hasKey(define.name)) {
