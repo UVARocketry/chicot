@@ -312,6 +312,7 @@ pub fn main() !void {
         \\// DO NOT MANUALLY EDIT!!
         \\// To regenerate this file, run `zig build header -p {s}`
         \\
+        \\#pragma once
         \\#include "stdint.h"
         \\
     , .{prefix});
