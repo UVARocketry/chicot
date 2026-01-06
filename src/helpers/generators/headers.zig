@@ -110,15 +110,16 @@ pub fn resolveInfoFor(
     writer: *std.Io.Writer,
     resolvedTypes: *std.hash_map.StringHashMap(bool),
 ) !void {
+    const cleanName = try cleanTypeName(T, alloc);
+    std.log.info("Found type: {s}, {}\n", .{ cleanName, T });
+    if (resolvedTypes.contains(cleanName)) {
+        std.log.info("Skipping type: {s}, {}\n", .{ cleanName, T });
+        return;
+    }
+    std.log.info("Parsing type: {s}, {}\n", .{ cleanName, T });
+    try markTypeDefined(T, alloc, resolvedTypes);
     switch (@typeInfo(T)) {
         .@"enum" => |e| {
-            const cleanName = try cleanTypeName(T, alloc);
-            // @compileLog(cleanName);
-            // defer alloc.free(cleanName);
-            if (resolvedTypes.contains(cleanName)) {
-                return;
-            }
-            try markTypeDefined(T, alloc, resolvedTypes);
             const backingName = try cleanTypeName(e.tag_type, alloc);
             try writer.print(
                 \\#ifdef __cplusplus
@@ -146,14 +147,11 @@ pub fn resolveInfoFor(
             }
             try writer.print("}} {s};\n#endif\n\n", .{cleanName});
         },
+        .@"opaque" => |_| {
+            try writer.print("struct {s};\n", .{cleanName});
+            return;
+        },
         .@"struct" => |s| {
-            const cleanName = try cleanTypeName(T, alloc);
-            // @compileLog(cleanName);
-            // defer alloc.free(cleanName);
-            if (resolvedTypes.contains(cleanName)) {
-                return;
-            }
-            try markTypeDefined(T, alloc, resolvedTypes);
             inline for (s.fields) |f| {
                 try resolveInfoFor(f.type, alloc, writer, resolvedTypes);
             }
@@ -174,12 +172,6 @@ pub fn resolveInfoFor(
             try resolveInfoFor(f.return_type.?, alloc, writer, resolvedTypes);
         },
         .@"union" => |u| {
-            const cleanName = try cleanTypeName(T, alloc);
-            // defer alloc.free(cleanName);
-            if (resolvedTypes.contains(cleanName)) {
-                return;
-            }
-            try resolvedTypes.put(cleanName, true);
             inline for (u.fields) |f| {
                 try resolveInfoFor(f.type, alloc, writer, resolvedTypes);
             }
@@ -194,7 +186,20 @@ pub fn resolveInfoFor(
         .pointer => |p| {
             try resolveInfoFor(p.child, alloc, writer, resolvedTypes);
         },
-        else => {},
+        .optional => |p| {
+            std.log.info("Resolving optional: {}\n", .{p.child});
+            switch (@typeInfo(p.child)) {
+                .pointer => |ptr| {
+                    try resolveInfoFor(ptr.child, alloc, writer, resolvedTypes);
+                },
+                else => {
+                    std.log.warn("Unknown optional child for: {s}, {}, {}\n", .{ cleanName, T, @typeInfo(T) });
+                },
+            }
+        },
+        else => {
+            std.log.warn("Unable to resolve type: {s}, {}, {}\n", .{ cleanName, T, @typeInfo(T) });
+        },
     }
 }
 
@@ -207,7 +212,8 @@ pub fn abiCompatible(T: type) bool {
             if (v.size == .slice) {
                 return false;
             }
-            return abiCompatible(v.child);
+            // allow any pointer child type to be abi compatible because pointers always are
+            return true;
         },
         .type => return false,
         .int => |v| {
@@ -234,6 +240,7 @@ pub fn writeFn(
             if (!fun.calling_convention.eql(.c)) {
                 return;
             }
+            std.log.info("Parsing function {s}, {}, conv(.{})\n", .{ name, @TypeOf(f), fun.calling_convention });
 
             inline for (fun.params) |param| {
                 try resolveInfoFor(param.type.?, alloc, writer, resolvedTypes);
@@ -285,9 +292,9 @@ pub fn main() !void {
 
     _ = args.next() orelse return error.NoArg;
 
-    const out = args.next() orelse return error.NoFile;
-    const mode = args.next() orelse return error.NoMode;
-    const prefix = args.next() orelse return error.NoPrefix;
+    const out = args.next() orelse try std.fs.cwd().realpathAlloc(alloc, "thing.h");
+    const mode = args.next() orelse "desktop";
+    const prefix = args.next() orelse ".";
 
     const file = try std.fs.createFileAbsolute(out, .{
         .truncate = true,

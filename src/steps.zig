@@ -54,6 +54,7 @@ pub fn addHeaderGen(
     const headerOut = runHeadergen.addOutputFileArg("zig.h");
     runHeadergen.addArg(mode);
     runHeadergen.addArg(buildPrefix);
+    b.installArtifact(headergenProg);
 
     return headerOut;
 }

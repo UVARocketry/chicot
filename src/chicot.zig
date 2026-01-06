@@ -100,6 +100,7 @@ pub fn createModulesAndLibs(
             .root_source_file = rootZig orelse emptyFile,
             .target = target,
             .optimize = optimize,
+            // .code_model = .extreme,
             // these all shrink down the exe size
             .error_tracing = false,
             .omit_frame_pointer = false,
@@ -107,6 +108,7 @@ pub fn createModulesAndLibs(
             .stack_check = false,
             .stack_protector = false,
             .single_threaded = true,
+            .pic = true,
             // this is ABSOLUTELY NECESSARY, otherwise linking will fail (i think)
             .unwind_tables = .none,
         } else .{
@@ -750,24 +752,26 @@ pub fn build(
         // spaceCount,
     );
 
-    const emittedHeader = try steps.addHeaderGen(
-        b,
-        chicot,
-        helpers,
-        modules.libzigMod,
-        resolvedInfo.selectedMode,
-        b.install_prefix,
-    );
-    const headerGenStep = b.step(
-        "header",
-        "Emit a C/C++ header that exports all the symbols in the src/root.zig file",
-    );
-    const inst = b.addInstallFile(emittedHeader, try std.fmt.allocPrint(
-        b.allocator,
-        "zigheader.h",
-        .{},
-    ));
-    headerGenStep.dependOn(&inst.step);
+    if (resolvedInfo.buildType == .desktop) {
+        const emittedHeader = try steps.addHeaderGen(
+            b,
+            chicot,
+            helpers,
+            modules.libzigMod,
+            resolvedInfo.selectedMode,
+            b.install_prefix,
+        );
+        const headerGenStep = b.step(
+            "header",
+            "Emit a C/C++ header that exports all the symbols in the src/root.zig file",
+        );
+        const inst = b.addInstallFile(emittedHeader, try std.fmt.allocPrint(
+            b.allocator,
+            "zigheader.h",
+            .{},
+        ));
+        headerGenStep.dependOn(&inst.step);
+    }
 
     if (modules.rootTests) |rootTests| {
         const runTests = b.addRunArtifact(rootTests);
