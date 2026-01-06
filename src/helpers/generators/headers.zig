@@ -111,12 +111,12 @@ pub fn resolveInfoFor(
     resolvedTypes: *std.hash_map.StringHashMap(bool),
 ) !void {
     const cleanName = try cleanTypeName(T, alloc);
-    std.log.info("Found type: {s}, {}\n", .{ cleanName, T });
+    // std.log.info("Found type: {s}, {}\n", .{ cleanName, T });
     if (resolvedTypes.contains(cleanName)) {
-        std.log.info("Skipping type: {s}, {}\n", .{ cleanName, T });
+        // std.log.info("Skipping type: {s}, {}\n", .{ cleanName, T });
         return;
     }
-    std.log.info("Parsing type: {s}, {}\n", .{ cleanName, T });
+    // std.log.info("Parsing type: {s}, {}\n", .{ cleanName, T });
     try markTypeDefined(T, alloc, resolvedTypes);
     switch (@typeInfo(T)) {
         .@"enum" => |e| {
@@ -187,18 +187,18 @@ pub fn resolveInfoFor(
             try resolveInfoFor(p.child, alloc, writer, resolvedTypes);
         },
         .optional => |p| {
-            std.log.info("Resolving optional: {}\n", .{p.child});
+            // std.log.info("Resolving optional: {}\n", .{p.child});
             switch (@typeInfo(p.child)) {
                 .pointer => |ptr| {
                     try resolveInfoFor(ptr.child, alloc, writer, resolvedTypes);
                 },
                 else => {
-                    std.log.warn("Unknown optional child for: {s}, {}, {}\n", .{ cleanName, T, @typeInfo(T) });
+                    // std.log.warn("Unknown optional child for: {s}, {}, {}\n", .{ cleanName, T, @typeInfo(T) });
                 },
             }
         },
         else => {
-            std.log.warn("Unable to resolve type: {s}, {}, {}\n", .{ cleanName, T, @typeInfo(T) });
+            // std.log.warn("Unable to resolve type: {s}, {}, {}\n", .{ cleanName, T, @typeInfo(T) });
         },
     }
 }
@@ -240,7 +240,7 @@ pub fn writeFn(
             if (!fun.calling_convention.eql(.c)) {
                 return;
             }
-            std.log.info("Parsing function {s}, {}, conv(.{})\n", .{ name, @TypeOf(f), fun.calling_convention });
+            // std.log.info("Parsing function {s}, {}, conv(.{})\n", .{ name, @TypeOf(f), fun.calling_convention });
 
             inline for (fun.params) |param| {
                 try resolveInfoFor(param.type.?, alloc, writer, resolvedTypes);
