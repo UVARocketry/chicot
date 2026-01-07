@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const getTheseDeps = @import("./desktopLspInfo.zig").getTheseDeps;
 const helpers = @import("helpers");
 const ZonType = helpers.buildInfo.ZonType;
 const zon = @import("zon");
@@ -285,6 +286,16 @@ pub fn main() !void {
         try cflagsIow.print("{s}\n", .{define});
     }
     try cflagsIow.writeAll("\n");
+
+    const deps = try getTheseDeps(allocator, val, mode);
+    for (deps) |dep| {
+        switch (dep.location) {
+            .path => |p| {
+                try cflagsIow.print("-I{s}/src\n", .{p});
+            },
+            .url => |_| {},
+        }
+    }
 
     for (v.value.includes.value.build) |inc| {
         // skip words that contain these triggers bc for SOME reason clangd does not like
