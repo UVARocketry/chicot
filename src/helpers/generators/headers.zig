@@ -7,7 +7,9 @@ const zon = @import("zon");
 const zonParse = helpers.parseZon;
 const inherit = helpers.inherit;
 
-pub fn cleanTypeName(T: type, alloc: std.mem.Allocator) ![]const u8 {
+const Err = std.mem.Allocator.Error || std.Io.Writer.Error;
+
+pub fn cleanTypeName(T: type, alloc: std.mem.Allocator) Err![]const u8 {
     switch (@typeInfo(T)) {
         .int => |v| {
             var writer: std.Io.Writer.Allocating = .init(alloc);
@@ -98,7 +100,7 @@ pub fn markTypeDefined(
     T: type,
     alloc: std.mem.Allocator,
     resolvedTypes: *std.hash_map.StringHashMap(bool),
-) !void {
+) Err!void {
     const cleanName = try cleanTypeName(T, alloc);
     // defer alloc.free(cleanName);
     try resolvedTypes.put(cleanName, true);
@@ -109,7 +111,7 @@ pub fn resolveInfoFor(
     alloc: std.mem.Allocator,
     writer: *std.Io.Writer,
     resolvedTypes: *std.hash_map.StringHashMap(bool),
-) !void {
+) Err!void {
     const cleanName = try cleanTypeName(T, alloc);
     // std.log.info("Found type: {s}, {}\n", .{ cleanName, T });
     if (resolvedTypes.contains(cleanName)) {
