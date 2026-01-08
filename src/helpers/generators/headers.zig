@@ -14,10 +14,14 @@ pub fn cleanTypeName(T: type, alloc: std.mem.Allocator) Err![]const u8 {
         .int => |v| {
             var writer: std.Io.Writer.Allocating = .init(alloc);
             defer writer.deinit();
-            try writer.writer.print("{s}int{}_t", .{
-                if (v.signedness == .signed) "" else "u",
-                v.bits,
-            });
+            if (T == u8) {
+                try writer.writer.print("char", .{});
+            } else {
+                try writer.writer.print("{s}int{}_t", .{
+                    if (v.signedness == .signed) "" else "u",
+                    v.bits,
+                });
+            }
             return try writer.toOwnedSlice();
         },
         .float => |v| {
