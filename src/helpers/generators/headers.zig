@@ -69,6 +69,9 @@ pub fn cleanTypeName(T: type, alloc: std.mem.Allocator) Err![]const u8 {
             });
             return try writer.toOwnedSlice();
         },
+        .@"opaque" => {
+            return try alloc.dupe(u8, "anyopaque_dontUse");
+        },
         .optional => |v| {
             std.debug.assert(@typeInfo(v.child) == .pointer);
             return try cleanTypeName(v.child, alloc);
@@ -228,6 +231,7 @@ pub fn abiCompatible(T: type) bool {
             }
             return true;
         },
+        .@"enum" => return true,
         else => {
             @compileError(std.fmt.comptimePrint("Type {} is not abi compatible!", .{T}));
         },
@@ -266,6 +270,9 @@ pub fn writeFn(
                 }
             }
             try writer.writeAll(");\n\n");
+        },
+        .type => |_| {
+            try resolveInfoFor(f, alloc, writer, resolvedTypes);
         },
         else => {
             if (!abiCompatible(@TypeOf(f))) {
