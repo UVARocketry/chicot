@@ -148,7 +148,7 @@ pub fn createModulesAndLibs(
 
     // A library that contains this library's libcpp and links all dependency libcpp's
     const libcpp = b.addLibrary(.{
-        .name = "cpp",
+        .name = getZigName(b, "cpp", projectName, ""),
         .linkage = .static,
         .root_module = cppMod,
     });
@@ -298,6 +298,7 @@ pub fn createModulesAndLibs(
             .mode = @tagName(resolvedInfo.buildType),
             .__flagsFromRoot = rootFlags,
             .dontBuildEverything = true,
+            .__buildNothing = parentFlags.len != 0,
             // .__spaceCount = spaceCount + 2,
             .__flagsFromParent = parentFlags,
             .target = target,
@@ -305,9 +306,12 @@ pub fn createModulesAndLibs(
         });
 
         const depLibZigMod = dep.module(depInfo.dependencyName);
+
         const depLibCpp =
-            if (resolvedInfo.buildType == .desktop) blk: {
-                const l = dep.artifact("cpp");
+            if (parentFlags.len != 0)
+                null
+            else if (resolvedInfo.buildType == .desktop) blk: {
+                const l = dep.artifact(getZigName(b, "cpp", depInfo.dependencyName, ""));
                 libCppForDeps.root_module.linkLibrary(l);
                 try libcpps.append(b.allocator, l);
                 break :blk l;
@@ -317,22 +321,29 @@ pub fn createModulesAndLibs(
         // we have to link all objects together and stuff,
         // but when we are building for python modules, it is better to link
         // in libzig
+
         const depLibZigObj =
-            if (resolvedInfo.buildType == .teensy41)
+            if (parentFlags.len != 0)
+                null
+            else if (resolvedInfo.buildType == .teensy41)
                 dep.namedLazyPath(getZigName(b, "obj/", depInfo.dependencyName, ".o"))
             else
                 null;
 
         const depLibZig =
-            if (resolvedInfo.buildType == .desktop) blk: {
+            if (parentFlags.len != 0)
+                null
+            else if (resolvedInfo.buildType == .desktop) blk: {
                 const l = dep.artifact(getZigName(b, "", depInfo.dependencyName, ""));
                 try libzigs.append(b.allocator, l);
                 break :blk l;
             } else null;
+
         const headers = dep.artifact("headers");
         const depsDepHeaders = dep.artifact("depheaders");
 
         const headersTree = headers.getEmittedIncludeTree();
+
         inline for (@typeInfo(@TypeOf(zon.dependencies)).@"struct".fields) |field| {
             const val = @field(zon.dependencies, field.name);
             if (std.mem.eql(u8, field.name, depInfo.dependencyName)) {
@@ -350,27 +361,33 @@ pub fn createModulesAndLibs(
         if (pythonMod) |mod| {
             mod.addImport(depInfo.importName orelse depInfo.dependencyName, depLibZigMod);
             mod.addIncludePath(headersTree);
-            mod.linkLibrary(depLibCpp.?);
+            if (depLibCpp) |d| {
+                mod.linkLibrary(d);
+            }
             // python.?.linkLibrary(depLibCpp.?);
         }
 
         if (exeMod) |mod| {
             // mod.addImport(depInfo.importName orelse depInfo.dependencyName, depLibZigMod);
             mod.addIncludePath(headersTree);
-            mod.linkLibrary(depLibCpp.?);
+            if (depLibCpp) |d| {
+                mod.linkLibrary(d);
+            }
         }
-        depHeaderLib.installHeadersDirectory(headersTree, depHeadersDir, .{
-            .include_extensions = headerExtensions,
-            .exclude_extensions = headerExcludeExtensions,
-        });
-        depHeaderLib.installHeadersDirectory(
-            depsDepHeaders.getEmittedIncludeTree(),
-            "",
-            .{
+        if (parentFlags.len != 0) {
+            depHeaderLib.installHeadersDirectory(headersTree, depHeadersDir, .{
                 .include_extensions = headerExtensions,
                 .exclude_extensions = headerExcludeExtensions,
-            },
-        );
+            });
+            depHeaderLib.installHeadersDirectory(
+                depsDepHeaders.getEmittedIncludeTree(),
+                "",
+                .{
+                    .include_extensions = headerExtensions,
+                    .exclude_extensions = headerExcludeExtensions,
+                },
+            );
+        }
         libzigMod.addIncludePath(depsDepHeaders.getEmittedIncludeTree());
 
         libzigMod.addImport(
@@ -519,6 +536,7 @@ const FullBuildInfo = struct {
     buildType: enum { teensy41, desktop },
     selectedMode: []const u8,
     buildEverything: bool,
+    buildNothing: bool,
 };
 
 pub fn resolveBuildInformation(b: *std.Build, zon: anytype) !FullBuildInfo {
@@ -570,6 +588,8 @@ pub fn resolveBuildInformation(b: *std.Build, zon: anytype) !FullBuildInfo {
     };
 
     const dontBuildEverything = b.option(bool, "dontBuildEverything", "Whether to build everything specified by the zon file, or just items needed for parent deps") orelse false;
+
+    const buildNothing = b.option(bool, "__buildNothing", "internal") orelse false;
 
     if (!thing.hasKey(mode)) {
         @panic(try std.fmt.allocPrint(
@@ -673,6 +693,7 @@ pub fn resolveBuildInformation(b: *std.Build, zon: anytype) !FullBuildInfo {
         .buildType = if (modeInfo.platformio) |_| .teensy41 else .desktop,
         .selectedMode = mode,
         .buildEverything = !dontBuildEverything,
+        .buildNothing = buildNothing,
     };
 }
 
@@ -842,13 +863,16 @@ pub fn build(
 
     const outputTypes = resolvedInfo.buildInfo.outputTypes;
 
-    if (resolvedInfo.buildType == .desktop) {
+    if (resolvedInfo.buildType == .desktop and !resolvedInfo.buildNothing) {
         b.installArtifact(modules.libcpp);
         check.dependOn(&modules.libcpp.step);
     }
 
+    // if (!resolvedInfo.buildNothing) {
     b.installArtifact(modules.headerLib);
     b.installArtifact(modules.depHeaderLib);
+    // }
+
     b.addNamedLazyPath(getZigName(b, "obj/", projectName, ".o"), modules.zigobject.getEmittedBin());
 
     if (std.mem.containsAtLeastScalar(
@@ -856,12 +880,12 @@ pub fn build(
         outputTypes,
         1,
         .liball,
-    ) and resolvedInfo.buildEverything) {
+    ) and resolvedInfo.buildEverything and !resolvedInfo.buildNothing) {
         // std.debug.print("Installing liball!\n", .{});
         b.installArtifact(modules.lib);
         check.dependOn(&modules.lib.step);
     }
-    if (resolvedInfo.buildInfo.platformio != null) {
+    if (resolvedInfo.buildInfo.platformio != null and !resolvedInfo.buildNothing) {
         b.installArtifact(modules.platformioClangdCompatHeaders);
     }
 
@@ -872,8 +896,10 @@ pub fn build(
     //     .libzig,
     // ) and resolvedInfo.buildEverything) {
     // std.debug.print("Installing libzig!\n", .{});
-    b.installArtifact(modules.libzig);
-    check.dependOn(&modules.libzig.step);
+    if (!resolvedInfo.buildNothing) {
+        b.installArtifact(modules.libzig);
+        check.dependOn(&modules.libzig.step);
+    }
     // b.installArtifact(modules.zigobject);
     // check.dependOn(&modules.zigobject.step);
     // }
@@ -882,7 +908,7 @@ pub fn build(
         outputTypes,
         1,
         .pythonmodule,
-    ) and resolvedInfo.buildEverything) {
+    ) and resolvedInfo.buildEverything and !resolvedInfo.buildNothing) {
         const forceBuildPy = b.option(
             bool,
             "forceBuildPy",
@@ -931,7 +957,7 @@ pub fn build(
         outputTypes,
         1,
         .exe,
-    ) and resolvedInfo.buildEverything) {
+    ) and resolvedInfo.buildEverything and !resolvedInfo.buildNothing) {
         // std.debug.print("Installing exe!\n", .{});
         if (modules.exe) |exe| {
             b.installArtifact(exe);
@@ -949,7 +975,7 @@ pub fn build(
         outputTypes,
         1,
         .exe,
-    ) and resolvedInfo.buildEverything) {
+    ) and resolvedInfo.buildEverything and !resolvedInfo.buildNothing) {
         if (modules.exe) |exe| {
             const run_step = b.step("run", "Run the exe");
 

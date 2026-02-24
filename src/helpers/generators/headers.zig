@@ -53,7 +53,7 @@ pub fn cleanTypeName(T: type, alloc: std.mem.Allocator) Err![]const u8 {
         .pointer => |v| {
             var writer: std.Io.Writer.Allocating = .init(alloc);
             defer writer.deinit();
-            if (v.child == anyopaque) {
+            if (T == *anyopaque) {
                 try writer.writer.print("{s}void*", .{
                     if (v.is_const) "const " else "",
                 });
@@ -68,9 +68,6 @@ pub fn cleanTypeName(T: type, alloc: std.mem.Allocator) Err![]const u8 {
                 if (isFn) "" else "*",
             });
             return try writer.toOwnedSlice();
-        },
-        .@"opaque" => {
-            return try alloc.dupe(u8, "anyopaque_dontUse");
         },
         .optional => |v| {
             std.debug.assert(@typeInfo(v.child) == .pointer);
