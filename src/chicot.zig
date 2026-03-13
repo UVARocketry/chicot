@@ -811,7 +811,10 @@ pub fn build(
         const homeDirVar =
             if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
 
-        const homeDir = try std.process.getEnvVarOwned(b.allocator, homeDirVar);
+        var homeDir = try std.process.getEnvVarOwned(b.allocator, homeDirVar);
+        if (builtin.os.tag == .windows and homeDir.len == 0) {
+            homeDir = try std.process.getEnvVarOwned(b.allocator, "HOME");
+        }
         const binDir =
             if (builtin.os.tag == .windows) "Scripts" else "bin";
         const separator =
@@ -819,8 +822,8 @@ pub fn build(
 
         const expectedPioDir = try std.fmt.allocPrint(
             b.allocator,
-            "{s}{c}penv{c}{s}",
-            .{ homeDir, separator, separator, binDir },
+            "{s}{c}.platformio{c}penv{c}{s}",
+            .{ homeDir, separator, separator, separator, binDir },
         );
 
         // std.debug.print("searching at {s}!\n", .{expectedPioDir});
