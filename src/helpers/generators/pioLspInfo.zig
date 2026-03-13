@@ -275,13 +275,17 @@ pub fn main() !void {
 
     // try stdout.print("g++ name: {s}\n", .{gppName});
     // std.debug.print("g++ name: {s}\n", .{gppName});
-    if (!std.mem.endsWith(u8, gppName, gPlPl) and !std.mem.endsWith(u8, gppName, gPlPlExe)) {
+    if (!std.mem.endsWith(u8, gppName, gPlPl) and !std.mem.endsWith(u8, v.value.cxx_path.value, gPlPlExe)) {
         return error.NotGPlusPlus;
     }
 
     // TODO: use actual .hpp headers so we dont have to have this
     try cflagsIow.writeAll("-xc++\n");
-    try cflagsIow.print("--target={s}\n\n", .{gppName[0 .. gppName.len - gPlPl.len]});
+    if (std.mem.endsWith(u8, v.value.cxx_path.value, gPlPlExe)) {
+        try cflagsIow.print("--target={s}\n\n", .{gppName[0 .. gppName.len - gPlPlExe.len]});
+    } else {
+        try cflagsIow.print("--target={s}\n\n", .{gppName[0 .. gppName.len - gPlPl.len]});
+    }
 
     for (v.value.cxx_flags.value) |define| {
         try cflagsIow.print("{s}\n", .{define});
