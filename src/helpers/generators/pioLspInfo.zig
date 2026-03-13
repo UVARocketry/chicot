@@ -271,10 +271,11 @@ pub fn main() !void {
     const gppName = std.fs.path.basename(v.value.cxx_path.value);
 
     const gPlPl = "-g++";
+    const gPlPlExe = "-g++.exe";
 
     // try stdout.print("g++ name: {s}\n", .{gppName});
     // std.debug.print("g++ name: {s}\n", .{gppName});
-    if (!std.mem.endsWith(u8, gppName, gPlPl)) {
+    if (!std.mem.endsWith(u8, gppName, gPlPl) and !std.mem.endsWith(u8, gppName, gPlPlExe)) {
         return error.NotGPlusPlus;
     }
 
