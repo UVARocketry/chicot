@@ -62,7 +62,7 @@ pub fn getTheseDeps(
     val: ZonType,
     mode: []const u8,
 ) ![]DependencyInfo {
-    var deps: std.ArrayList(DependencyInfo) = .{};
+    var deps: std.ArrayList(DependencyInfo) = .empty;
 
     const next = val.get(mode);
 
@@ -98,10 +98,11 @@ pub fn getTheseDeps(
     return deps.items;
 }
 
-pub fn main() !void {
-    const allocator = std.heap.smp_allocator;
-    var zonParseArena: std.heap.ArenaAllocator = .init(allocator);
-    const arena = zonParseArena.allocator();
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    // const allocator = init.gpa;
+    const arena = init.arena.allocator();
+    defer _ = init.arena.reset(.free_all);
 
     var val = zonParse.parseZonStruct(
         arena,
@@ -112,7 +113,7 @@ pub fn main() !void {
 
     try inherit.resolveInheritance(arena, &val);
 
-    var argIterator = try std.process.argsWithAllocator(arena);
+    var argIterator = try init.minimal.args.iterateAllocator(arena);
     if (argIterator.next()) |_| {} else {
         return error.NoArgs;
     }
@@ -124,7 +125,7 @@ pub fn main() !void {
     const depHeaders = argIterator.next() orelse "desktop";
     const compatHeaders = argIterator.next() orelse "platformio_clangd";
     _ = compatHeaders;
-    const cwd = try std.process.getCwdAlloc(arena);
+    const cwd = try std.Io.Dir.cwd().realPathFileAlloc(init.io, ".", arena);
     const compileFlags = argIterator.next() orelse
         try std.fmt.allocPrint(arena, "{s}/{s}", .{ cwd, "zig-out/ogaboogaflags.txt" });
     // const cCppProps = argIterator.next() orelse
@@ -143,16 +144,16 @@ pub fn main() !void {
     const modeInfo = val.get(mode);
 
     var soBuf: [512]u8 = undefined;
-    var soWriter = std.fs.File.stdout().writer(&soBuf);
+    var soWriter = std.Io.File.stdout().writer(io, &soBuf);
     const stdout = &soWriter.interface;
 
-    const deps = try getTheseDeps(allocator, val, mode);
+    const deps = try getTheseDeps(arena, val, mode);
 
     var fileBuf: [512]u8 = undefined;
     {
-        const cFlagsFile = try std.fs.createFileAbsolute(compileFlags, .{ .truncate = true });
-        defer cFlagsFile.close();
-        var compileFlagsWriter = cFlagsFile.writer(&fileBuf);
+        const cFlagsFile = try std.Io.Dir.createFileAbsolute(io, compileFlags, .{ .truncate = true });
+        defer cFlagsFile.close(io);
+        var compileFlagsWriter = cFlagsFile.writer(io, &fileBuf);
         const cflagsiow = &compileFlagsWriter.interface;
 
         try cflagsiow.writeAll("-xc++\n");
@@ -173,7 +174,7 @@ pub fn main() !void {
                 .path => |p| {
                     try cflagsiow.print("-I{s}/src\n", .{p});
                 },
-                .url => |_| {},
+                .url => {},
             }
         }
 

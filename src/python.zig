@@ -12,6 +12,7 @@ pub const PythonInfo = struct {
     pub fn getIncludePath(self: *PythonInfo) []const u8 {
         if (_include) |i| return i;
         const pythonInc = getPythonIncludePath(
+            self.b.graph.io,
             self.python_exe,
             self.b.allocator,
         ) catch @panic("Missing python");
@@ -21,6 +22,7 @@ pub const PythonInfo = struct {
     pub fn getLibraryPath(self: *PythonInfo) []const u8 {
         if (_lib) |l| return l;
         const pythonLib = getPythonLibraryPath(
+            self.b.graph.io,
             self.python_exe,
             self.b.allocator,
         ) catch @panic("Missing python");
@@ -31,6 +33,7 @@ pub const PythonInfo = struct {
     pub fn getLdVersion(self: *PythonInfo) []const u8 {
         if (_version) |v| return v;
         _version = getPythonLDVersion(
+            self.b.graph.io,
             self.python_exe,
             self.b.allocator,
             self.targetOs,
@@ -69,11 +72,11 @@ pub fn getPythonInfo(
 /// Returns the include path for the Python.h files for building the python modules.
 /// REQUIRES python to be installed
 fn getPythonIncludePath(
+    io: std.Io,
     python_exe: []const u8,
     allocator: std.mem.Allocator,
 ) ![]const u8 {
-    const includeResult = try runProcess(.{
-        .allocator = allocator,
+    const includeResult = try runProcess(allocator, io, .{
         .argv = &.{
             python_exe,
             "-c",
@@ -87,11 +90,11 @@ fn getPythonIncludePath(
 /// Returns the path for the python lib to be linked into the python modules.
 /// REQUIRES python to be installed
 fn getPythonLibraryPath(
+    io: std.Io,
     python_exe: []const u8,
     allocator: std.mem.Allocator,
 ) ![]const u8 {
-    const includeResult = try runProcess(.{
-        .allocator = allocator,
+    const includeResult = try runProcess(allocator, io, .{
         .argv = &.{
             python_exe,
             "-c",
@@ -105,6 +108,7 @@ fn getPythonLibraryPath(
 /// Returns the version of the python program installed.
 /// REQUIRES python to be installed
 fn getPythonLDVersion(
+    io: std.Io,
     python_exe: []const u8,
     allocator: std.mem.Allocator,
     targetOs: std.Target.Os.Tag,
@@ -115,8 +119,7 @@ fn getPythonLDVersion(
     else
         "import sysconfig; print(sysconfig.get_config_var('LDVERSION'), end='')";
 
-    const includeResult = try runProcess(.{
-        .allocator = allocator,
+    const includeResult = try runProcess(allocator, io, .{
         .argv = &.{
             python_exe,
             "-c",
@@ -128,7 +131,9 @@ fn getPythonLDVersion(
 }
 
 const runProcess =
-    if (builtin.zig_version.minor >= 12)
+    if (builtin.zig_version.minor >= 16)
+        std.process.run
+    else if (builtin.zig_version.minor >= 12)
         std.process.Child.run
     else
         std.process.Child.exec;

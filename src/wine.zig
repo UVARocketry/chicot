@@ -1,28 +1,48 @@
 const std = @import("std");
 const builtin = @import("builtin");
+
+const Config = struct {
+    home: ?[]const u8,
+    winePrefix: ?[]const u8,
+};
+
+var config: Config = .{
+    .home = null,
+    .winePrefix = null,
+};
+
+pub fn init(env: *const std.process.Environ.Map) !void {
+    if (config.home == null) {
+        config.home = env.get("HOME") orelse null;
+    }
+    if (config.winePrefix == null) {
+        config.winePrefix = env.get("WINEPREFIX") orelse null;
+    }
+}
+
 pub fn convertWinePathToLinuxPath(
     alloc: std.mem.Allocator,
     path: []const u8,
 ) ![]const u8 {
-    const home = try std.process.getEnvVarOwned(alloc, "HOME");
-    std.debug.print("HOME: {s}\n", .{home});
-    defer alloc.free(home);
-    const winePrefix = std.process.getEnvVarOwned(
-        alloc,
-        "WINEPREFIX",
-    ) catch try std.fs.path.join(
+    const home = config.home orelse return error.HomeEnvVarNotFound;
+
+    const winePrefix = config.winePrefix orelse try std.Io.Dir.path.join(
         alloc,
         &.{ home, ".wine" },
     );
-    std.debug.print("WINEPREFIX: {s}\n", .{winePrefix});
     defer alloc.free(winePrefix);
-    const actualWineLocation = try std.fs.path.join(
+
+    std.debug.print("WINEPREFIX: {s}\n", .{winePrefix});
+
+    const actualWineLocation = try std.Io.Dir.path.join(
         alloc,
         &.{ winePrefix, "drive_c" },
     );
-    std.debug.print("C:\\: {s}\n", .{actualWineLocation});
     defer alloc.free(actualWineLocation);
-    const newName = try std.fs.path.join(
+
+    std.debug.print("C:\\: {s}\n", .{actualWineLocation});
+
+    const newName = try std.Io.Dir.path.join(
         alloc,
         &.{
             actualWineLocation,

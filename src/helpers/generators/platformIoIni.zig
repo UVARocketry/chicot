@@ -34,12 +34,13 @@ pub fn getFileContents(
     return buf;
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     // var cwdBuf: [500]u8 = undefined;
 
-    const allocator = std.heap.smp_allocator;
-    var zonParseArena: std.heap.ArenaAllocator = .init(allocator);
-    const arena = zonParseArena.allocator();
+    const io = init.io;
+
+    const arena = init.arena.allocator();
+    defer _ = init.arena.reset(.free_all);
 
     var val = zonParse.parseZonStruct(
         arena,
@@ -50,7 +51,7 @@ pub fn main() !void {
 
     try inherit.resolveInheritance(arena, &val);
 
-    var argIterator = try std.process.argsWithAllocator(allocator);
+    var argIterator = try init.minimal.args.iterateAllocator(arena);
     if (argIterator.next()) |_| {} else {
         return error.NoArgs;
     }
@@ -59,13 +60,13 @@ pub fn main() !void {
     const pioContents = argIterator.next() orelse return error.NothingToDiff;
     const pioCheckContents = argIterator.next() orelse return error.NothingToDiff;
 
-    var allocatingWriter: std.Io.Writer.Allocating = .init(allocator);
+    var allocatingWriter: std.Io.Writer.Allocating = .init(arena);
     defer allocatingWriter.deinit();
 
-    const outputFile = try std.fs.createFileAbsolute(name, .{ .truncate = true });
-    defer outputFile.close();
+    const outputFile = try std.Io.Dir.createFileAbsolute(io, name, .{ .truncate = true });
+    defer outputFile.close(io);
     var buf: [1024]u8 = undefined;
-    var outWriter = outputFile.writer(&buf);
+    var outWriter = outputFile.writer(io, &buf);
     const outIow = &allocatingWriter.writer;
 
     try outIow.print(
@@ -96,8 +97,8 @@ pub fn main() !void {
         },
     };
 
-    var deps: std.ArrayList(DependencyInfo) = .{};
-    defer deps.deinit(allocator);
+    var deps: std.ArrayList(DependencyInfo) = .empty;
+    defer deps.deinit(arena);
 
     {
         var mapIter = val.map.iterator();
@@ -138,7 +139,7 @@ pub fn main() !void {
                         @panic("No dependency found!");
                     };
                     // append the dependency to the array
-                    try deps.append(allocator, newDep);
+                    try deps.append(arena, newDep);
                 }
             }
         }
@@ -174,20 +175,23 @@ pub fn main() !void {
                 switch (dep.location) {
                     .path => |pathName| {
                         const dir = if (std.fs.path.isAbsolute(pathName))
-                            try std.fs.openDirAbsolute(pathName, .{})
+                            try std.Io.Dir.openDirAbsolute(io, pathName, .{})
                         else
-                            try std.fs.cwd().openDir(pathName, .{});
+                            try std.Io.Dir.cwd().openDir(io, pathName, .{});
 
-                        const parent = try dir.openDir("..", .{});
-                        const newPath = try parent.realpathAlloc(allocator, ".");
+                        defer dir.close(io);
+
+                        const parent = try dir.openDir(io, "..", .{});
+                        const newPath = try parent.realPathFileAlloc(io, ".", arena);
                         const libPathName =
-                            std.fs.cwd().realpathAlloc(allocator, "lib") catch "";
+                            std.Io.Dir.cwd().realPathFileAlloc(io, "lib", arena) catch "";
                         // std.debug.print("{s} {s}\n", .{ newPath, libPathName });
                         if (std.mem.eql(u8, newPath, libPathName)) {
                             try outIow.print("{s}", .{
-                                std.fs.path.basename(try dir.realpathAlloc(
-                                    allocator,
+                                std.fs.path.basename(try dir.realPathFileAlloc(
+                                    io,
                                     ".",
+                                    arena,
                                 )),
                             });
                         } else {
@@ -234,6 +238,10 @@ pub fn main() !void {
             }
             try outIow.print(" -Lzig-out/lib -lzig-{s}", .{@tagName(zon.name)});
 
+            for (deps.items) |dep| {
+                try outIow.print(" -lzig-{s}", .{dep.name});
+            }
+
             try outIow.print(" -Izig-out/include -Izig-out/include/depheaders", .{});
             try outIow.print("\n", .{});
             try outIow.print("\n", .{});
@@ -269,12 +277,13 @@ pub fn main() !void {
         return error.DiffComparisonFailed;
     }
 
-    const outputPy = try std.fs.createFileAbsolute(
+    const outputPy = try std.Io.Dir.createFileAbsolute(
+        io,
         pioCheckPyName,
         .{ .truncate = true },
     );
-    defer outputPy.close();
-    var pyWriter = outputPy.writer(&buf);
+    defer outputPy.close(io);
+    var pyWriter = outputPy.writer(io, &buf);
     const pyIow = &pyWriter.interface;
     try pyIow.writeAll(checkPioPy);
     try pyIow.flush();

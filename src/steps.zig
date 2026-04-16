@@ -1,15 +1,18 @@
 const std = @import("std");
 
 pub fn getFileContents(
-    dir: std.fs.Dir,
+    io: std.Io,
+    dir: std.Io.Dir,
     name: []const u8,
     alloc: std.mem.Allocator,
     maxLen: usize,
 ) ![]const u8 {
     var buf = try alloc.alloc(u8, maxLen);
     errdefer alloc.free(buf);
-    const file = try dir.openFile(name, .{});
-    var reader = file.reader(&.{});
+    const file = try dir.openFile(io, name, .{});
+    defer file.close(io);
+
+    var reader = file.reader(io, &.{});
     const len = try reader.interface.readSliceShort(buf);
     if (len < buf.len) {
         if (alloc.resize(buf, len)) {
@@ -227,7 +230,8 @@ pub fn addPlatformioIniStep(
     const outputCheckPioPy = runPioIni.addOutputFileArg("checkpio.py");
     if (pioDiffMode) {
         const pioIniContents = try getFileContents(
-            std.fs.cwd(),
+            b.graph.io,
+            std.Io.Dir.cwd(),
             "platformio.ini",
             allocator,
             40000,
@@ -236,7 +240,8 @@ pub fn addPlatformioIniStep(
         runPioIni.addArg(pioIniContents);
 
         const checkpioContents = try getFileContents(
-            std.fs.cwd(),
+            b.graph.io,
+            std.Io.Dir.cwd(),
             "checkpio.py",
             allocator,
             40000,

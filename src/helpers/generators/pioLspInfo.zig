@@ -60,12 +60,20 @@ pub fn ParseStreamResult(T: type) type {
         }
     };
 
-    const internalType = @Type(.{ .@"struct" = .{
-        .fields = &fields,
-        .layout = .auto,
-        .decls = &.{},
-        .is_tuple = false,
-    } });
+    var fieldNames: [fields.len][]const u8 = undefined;
+    var fieldTypes: [fields.len]type = undefined;
+    comptime for (&fields, 0..) |field, i| {
+        fieldNames[i] = field.name;
+        fieldTypes[i] = field.type;
+    };
+
+    const internalType = @Struct(
+        .auto,
+        null,
+        &fieldNames,
+        &fieldTypes,
+        &@splat(.{}),
+    );
 
     const Ret = struct {
         value: internalType,
@@ -201,12 +209,10 @@ pub fn getFileContents(
     return buf;
 }
 
-pub fn main() !void {
-    // var cwdBuf: [500]u8 = undefined;
-
-    const allocator = std.heap.smp_allocator;
-    var zonParseArena: std.heap.ArenaAllocator = .init(allocator);
-    const arena = zonParseArena.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const arena = init.arena.allocator();
+    const io = init.io;
 
     var val = zonParse.parseZonStruct(
         arena,
@@ -217,7 +223,7 @@ pub fn main() !void {
 
     try inherit.resolveInheritance(arena, &val);
 
-    var argIterator = try std.process.argsWithAllocator(arena);
+    var argIterator = init.minimal.args.iterate();
     if (argIterator.next()) |_| {} else {
         return error.NoArgs;
     }
@@ -229,18 +235,17 @@ pub fn main() !void {
     // std.debug.print("{s}\n", .{compatHeaders});
     const compileFlags = argIterator.next() orelse "./zig-out/ogaboogaflags.txt";
 
-    const pioIni = std.fs.cwd().openFile("platformio.ini", .{
+    const pioIni = std.Io.Dir.cwd().openFile(io, "platformio.ini", .{
         .mode = .read_only,
     }) catch @panic("\x1b[31mPio lsp step requires having a platformio.ini file inside this directory! To generate it, run `zig build pio -p . -Dmode=...`\x1b[0m");
-    pioIni.close();
+    pioIni.close(io);
 
     if (val.get(mode).platformio == null) {
         std.debug.print("ERROR: build mode {s} does not have a platformio output type!\n", .{mode});
         return error.ModeNotAllowed;
     }
 
-    const proc = try runProcess(.{
-        .allocator = arena,
+    const proc = try runProcess(arena, io, .{
         .argv = &.{ pioProgramName, "project", "metadata", "-e", mode },
     });
 
@@ -259,13 +264,13 @@ pub fn main() !void {
     defer v.deinit();
 
     var soBuf: [512]u8 = undefined;
-    var soWriter = std.fs.File.stdout().writer(&soBuf);
+    var soWriter = std.Io.File.stdout().writer(io, &soBuf);
     const stdout = &soWriter.interface;
 
     var fileBuf: [512]u8 = undefined;
-    const file = try std.fs.createFileAbsolute(compileFlags, .{ .truncate = true });
-    defer file.close();
-    var compileFlagsWriter = file.writer(&fileBuf);
+    const file = try std.Io.Dir.createFileAbsolute(io, compileFlags, .{ .truncate = true });
+    defer file.close(io);
+    var compileFlagsWriter = file.writer(io, &fileBuf);
     const cflagsIow = &compileFlagsWriter.interface;
 
     const gppName = std.fs.path.basename(v.value.cxx_path.value);
@@ -298,7 +303,7 @@ pub fn main() !void {
             .path => |p| {
                 try cflagsIow.print("-I{s}/src\n", .{p});
             },
-            .url => |_| {},
+            .url => {},
         }
     }
 
@@ -353,4 +358,4 @@ fn isAsciiSpace(char: u8) bool {
     return char <= ' ' and char > 0;
 }
 
-const runProcess = if (builtin.zig_version.minor >= 12) std.process.Child.run else std.process.Child.exec;
+const runProcess = std.process.run;
