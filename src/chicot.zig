@@ -435,6 +435,7 @@ pub fn createModulesAndLibs(
         const rootTests = b.addTest(.{
             .root_module = libzigMod,
         });
+        rootTests.is_linking_libcpp = true;
         // link in essential cpp info
         rootTests.root_module.linkLibrary(libcpp);
         rootTests.root_module.linkLibrary(libCppForDeps);
