@@ -87,6 +87,9 @@ pub fn getZigName(
 //
 // a Full build calls dependencies in Dependency mode. A Dependency build calls deps
 // in Header mode
+//
+// Also, headers DONT emit a header lib, instead we emit a named lazy path that
+// contains all the files, then the dep parent can actually use that
 
 pub fn createModulesAndLibs(
     b: *std.Build,
@@ -145,6 +148,7 @@ pub fn createModulesAndLibs(
             // this is ABSOLUTELY NECESSARY, otherwise linking will fail (i think)
             .unwind_tables = .none,
         } else .{
+            .pic = true,
             .root_source_file = rootZig orelse emptyFile,
             .target = target,
             .optimize = optimize,
@@ -340,6 +344,13 @@ pub fn createModulesAndLibs(
             try depLibZigs.append(b.allocator, depLibZig);
         }
 
+        const depLibZig = if (resolvedInfo.buildLevel != .full)
+            null
+        else blk: {
+            const l = dep.artifact(getZigName(b, "", depInfo.dependencyName, ""));
+            break :blk l;
+        };
+
         // only deps of Full builds produce linkable artifacts
         const depLibCpp = if (resolvedInfo.buildLevel != .full)
             null
@@ -359,51 +370,63 @@ pub fn createModulesAndLibs(
             mod.addImport(depInfo.importName orelse depInfo.dependencyName, depLibZigMod);
         }
 
-        if (resolvedInfo.buildLevel.installLibs()) {
-            // for (0..@intFromEnum(resolvedInfo.buildLevel) + 1) |_| {
-            //     std.debug.print("  ", .{});
-            // }
-            // std.debug.print("Fetching headers from project {s} for {s}\n", .{
-            //     depInfo.dependencyName,
-            //     projectName,
-            // });
-            const headers = dep.artifact("headers");
+        // if (resolvedInfo.buildLevel.installLibs()) {
+        // for (0..@intFromEnum(resolvedInfo.buildLevel) + 1) |_| {
+        //     std.debug.print("  ", .{});
+        // }
+        // std.debug.print("Fetching headers from project {s} for {s}\n", .{
+        //     depInfo.dependencyName,
+        //     projectName,
+        // });
 
-            const headersTree = headers.getEmittedIncludeTree();
+        // const headersTree = dep.namedWriteFiles(depInfo.dependencyName);
 
-            depHeaderLib.installHeadersDirectory(headersTree, depHeadersDir, .{
-                .include_extensions = headerExtensions,
-                .exclude_extensions = headerExcludeExtensions,
-            });
+        const headersTree = dep.namedLazyPath(depInfo.dependencyName);
+        var headersPath: ?std.Build.LazyPath = null;
 
-            inline for (@typeInfo(@TypeOf(zon.dependencies)).@"struct".fields) |field| {
-                const val = @field(zon.dependencies, field.name);
-                if (std.mem.eql(u8, field.name, depInfo.dependencyName)) {
-                    if (@hasField(@TypeOf(val), "path")) {
-                        // if the dependency is a path on this file system, not a fetched
-                        // object, then we add an include to its src/ folder so
-                        // lsp goes to the right place on goto-definition
-                        libzigMod.addIncludePath(b.path(b.pathJoin(&.{ val.path, "src" })));
-                    } else {
-                        libzigMod.addIncludePath(headersTree);
-                    }
-                }
-            }
-            cppMod.addIncludePath(headersTree);
-            if (pythonMod) |mod| {
-                mod.addIncludePath(headersTree);
-                if (depLibCpp) |d| {
-                    mod.linkLibrary(d);
-                }
-            }
-
-            if (exeMod) |mod| {
-                mod.addIncludePath(headersTree);
-                if (depLibCpp) |d| {
-                    mod.linkLibrary(d);
+        inline for (@typeInfo(@TypeOf(zon.dependencies)).@"struct".fields) |field| {
+            const val = @field(zon.dependencies, field.name);
+            if (std.mem.eql(u8, field.name, depInfo.dependencyName)) {
+                if (@hasField(@TypeOf(val), "path")) {
+                    // if the dependency is a path on this file system, not a fetched
+                    // object, then we add an include to its src/ folder so
+                    // lsp goes to the right place on goto-definition
+                    headersPath = b.path(b.pathJoin(&.{ val.path, "src" }));
                 }
             }
         }
+        libzigMod.addIncludePath(headersTree);
+        if (headersPath) |p| {
+            libzigMod.addIncludePath(p);
+        }
+
+        headerLib.installHeadersDirectory(headersTree, depInfo.dependencyName, .{
+            .include_extensions = headerExtensions,
+            .exclude_extensions = headerExcludeExtensions,
+        });
+
+        cppMod.addIncludePath(headersTree);
+
+        if (pythonMod) |mod| {
+            mod.addIncludePath(headersTree);
+            if (depLibCpp) |d| {
+                mod.linkLibrary(d);
+            }
+            if (depLibZig) |d| {
+                mod.linkLibrary(d);
+            }
+        }
+
+        if (exeMod) |mod| {
+            mod.addIncludePath(headersTree);
+            if (depLibCpp) |d| {
+                mod.linkLibrary(d);
+            }
+            if (depLibZig) |d| {
+                mod.linkLibrary(d);
+            }
+        }
+        // }
     }
 
     libzigMod.addIncludePath(headerLib.getEmittedIncludeTree());
@@ -875,13 +898,18 @@ pub fn build(
         check.dependOn(&modules.libcpp.step);
     }
 
-    if (resolvedInfo.buildLevel.installHeaders()) {
-        b.installArtifact(modules.headerLib);
-        b.installArtifact(modules.depHeaderLib);
-        if (resolvedInfo.buildInfo.platformio != null) {
-            b.installArtifact(modules.platformioClangdCompatHeaders);
-        }
+    // if (resolvedInfo.buildLevel.installHeaders()) {
+    b.installDirectory(.{
+        .source_dir = modules.headerLib.getEmittedIncludeTree(),
+        .install_dir = .header,
+        .install_subdir = projectName,
+    });
+    b.addNamedLazyPath(projectName, modules.headerLib.getEmittedIncludeTree());
+
+    if (resolvedInfo.buildInfo.platformio != null) {
+        b.installArtifact(modules.platformioClangdCompatHeaders);
     }
+    // }
 
     if (resolvedInfo.buildLevel.installLibs()) {
         b.installArtifact(modules.libzig);
