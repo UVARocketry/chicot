@@ -212,7 +212,7 @@ pub fn getFileContents(
 pub fn main(init: std.process.Init) !void {
     // const allocator = init.gpa;
     const arena = init.arena.allocator();
-    defer init.arena.reset(.free_all);
+    defer _ = init.arena.reset(.free_all);
     const io = init.io;
 
     var val = zonParse.parseZonStruct(
