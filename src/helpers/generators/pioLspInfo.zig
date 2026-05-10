@@ -210,8 +210,9 @@ pub fn getFileContents(
 }
 
 pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
+    // const allocator = init.gpa;
     const arena = init.arena.allocator();
+    defer init.arena.reset(.free_all);
     const io = init.io;
 
     var val = zonParse.parseZonStruct(
@@ -297,7 +298,7 @@ pub fn main(init: std.process.Init) !void {
     }
     try cflagsIow.writeAll("\n");
 
-    const deps = try getTheseDeps(allocator, val, mode);
+    const deps = try getTheseDeps(arena, val, mode);
     for (deps) |dep| {
         switch (dep.location) {
             .path => |p| {
