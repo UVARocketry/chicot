@@ -841,7 +841,7 @@ pub fn build(
 
         var homeDir = b.graph.environ_map.get(homeDirVar) orelse "";
         if (builtin.os.tag == .windows and homeDir.len == 0) {
-            homeDir = b.graph.environ_map.get(b.allocator, "HOME") orelse return error.NoHomeVariable;
+            homeDir = b.graph.environ_map.get("HOME") orelse return error.NoHomeVariable;
         }
         const binDir =
             if (builtin.os.tag == .windows) "Scripts" else "bin";
