@@ -355,10 +355,19 @@ pub fn main(init: std.process.Init) !void {
         \\
     );
 
-    inline for (@typeInfo(r).@"struct".decls) |field| {
-        if (!ignoreDecls.contains(field.name)) {
-            const value = @field(r, field.name);
-            try writeFn(value, arena, field.name, iow, &resolvedTypes);
+    if (@hasDecl(r, "exports")) {
+        inline for (@field(r, "exports")) |fieldName| {
+            if (!ignoreDecls.contains(fieldName)) {
+                const value = @field(r, fieldName);
+                try writeFn(value, arena, fieldName, iow, &resolvedTypes);
+            }
+        }
+    } else {
+        inline for (@typeInfo(r).@"struct".decls) |field| {
+            if (!ignoreDecls.contains(field.name)) {
+                const value = @field(r, field.name);
+                try writeFn(value, arena, field.name, iow, &resolvedTypes);
+            }
         }
     }
 
