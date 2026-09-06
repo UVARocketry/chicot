@@ -224,7 +224,7 @@ pub fn main(init: std.process.Init) !void {
 
     try inherit.resolveInheritance(arena, &val);
 
-    var argIterator = init.minimal.args.iterate();
+    var argIterator = try init.minimal.args.iterateAllocator(arena);
     if (argIterator.next()) |_| {} else {
         return error.NoArgs;
     }

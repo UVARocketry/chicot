@@ -853,9 +853,17 @@ pub fn build(
             "{s}{c}.platformio{c}penv{c}{s}",
             .{ homeDir, separator, separator, separator, binDir },
         );
+        const expectedPioDir2 = try std.fmt.allocPrint(
+            b.allocator,
+            "{s}{c}.local{c}bin{c}{s}",
+            .{ homeDir, separator, separator, separator, binDir },
+        );
 
         // std.debug.print("searching at {s}!\n", .{expectedPioDir});
-        const pio = try b.findProgram(&.{pioProgramName}, &.{expectedPioDir});
+        const pio = try b.findProgram(&.{pioProgramName}, &.{
+            expectedPioDir,
+            expectedPioDir2,
+        });
         // std.debug.print("found pio at {s}!\n", .{pio});
         break :blk pio;
     };
