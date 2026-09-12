@@ -276,7 +276,12 @@ pub fn main(init: std.process.Init) !void {
         pioContents,
         allocatingWriter.writer.buffer[0..allocatingWriter.writer.end],
     )) {
-        std.debug.print("no\n", .{});
+        std.debug.print("no at the platformio.ini\n\n\n", .{});
+        std.debug.print("{s}\n\n\n----------------------------------------\n", .{pioContents});
+        std.debug.print(
+            "{s}\n\n\n",
+            .{allocatingWriter.writer.buffer[0..allocatingWriter.writer.end]},
+        );
         return error.DiffComparisonFailed;
     }
 
@@ -296,7 +301,9 @@ pub fn main(init: std.process.Init) !void {
         pioCheckContents,
         checkPioPy,
     )) {
-        std.debug.print("no\n", .{});
+        std.debug.print("no at the checkpio.py\n\n\n", .{});
+        std.debug.print("{s}\n\n\n----------------------------------------\n", .{pioCheckContents});
+        std.debug.print("{s}\n\n\n", .{checkPioPy});
         return error.DiffComparisonFailed;
     }
 }
