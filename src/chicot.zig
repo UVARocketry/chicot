@@ -890,6 +890,7 @@ pub fn build(
             pyInfo.getIncludePath(),
             modules.depHeadersDir,
             modules.platformioClangdCompatHeaders,
+            projectName,
         );
     }
 

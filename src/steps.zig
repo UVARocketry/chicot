@@ -152,6 +152,7 @@ pub fn addDesktopLspStep(
     pythonInc: []const u8,
     depHeadersDir: []const u8,
     platformioClangdCompatHeaders: *std.Build.Step.Compile,
+    projectName: []const u8,
 ) !void {
     const lspModule = b.createModule(.{
         .root_source_file = chicot.path("src/helpers/generators/desktopLspInfo.zig"),
@@ -171,6 +172,7 @@ pub fn addDesktopLspStep(
     // b.installArtifact(pioIniProgram);
     const runLsp = b.addRunArtifact(lspProgram);
 
+    runLsp.addArg(projectName);
     // keep this in here just in case we merge pioLspInfo and desktopLspInfo
     runLsp.addArg(pioProgramName);
     runLsp.addArg(mode);

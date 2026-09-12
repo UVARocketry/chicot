@@ -118,28 +118,18 @@ pub fn main(init: std.process.Init) !void {
         return error.NoArgs;
     }
 
+    const projectName = argIterator.next() orelse "idkprogramname :((";
     const pioProgramName = argIterator.next() orelse "platformio";
     _ = pioProgramName;
     const mode = argIterator.next() orelse "desktop";
     const pythonInc = argIterator.next() orelse "desktop";
     const depHeaders = argIterator.next() orelse "desktop";
+    _ = depHeaders;
     const compatHeaders = argIterator.next() orelse "platformio_clangd";
     _ = compatHeaders;
     const cwd = try std.Io.Dir.cwd().realPathFileAlloc(init.io, ".", arena);
     const compileFlags = argIterator.next() orelse
         try std.fmt.allocPrint(arena, "{s}/{s}", .{ cwd, "zig-out/ogaboogaflags.txt" });
-    // const cCppProps = argIterator.next() orelse
-    //     try std.fmt.allocPrint(
-    //         arena,
-    //         "{s}/{s}",
-    //         .{ cwd, "./zig-out/.vscode/c_cpp_properties.json" },
-    //     );
-    // const currentCppProps = argIterator.next() orelse
-    //     try std.fmt.allocPrint(
-    //         arena,
-    //         "{s}/{s}",
-    //         .{ cwd, "./.vscode/c_cpp_properties.json" },
-    //     );
 
     const modeInfo = val.get(mode);
 
@@ -178,7 +168,9 @@ pub fn main(init: std.process.Init) !void {
             }
         }
 
-        try cflagsiow.print("-Izig-out/include/{s}\n", .{depHeaders});
+        for (deps) |dep| {
+            try cflagsiow.print("-Izig-out/include/{s}/{s}\n", .{ projectName, dep.name });
+        }
 
         for (modeInfo.cpp.otherFlags) |flag| {
             try cflagsiow.print("{s}\n", .{flag});
@@ -208,87 +200,6 @@ pub fn main(init: std.process.Init) !void {
         }
         try cflagsiow.flush();
     }
-
-    // if (addToJson(
-    //     arena,
-    //     modeInfo,
-    //     currentCppProps,
-    //     cCppProps,
-    //     pythonInc,
-    //     mode,
-    //     &fileBuf,
-    // )) {} else |_| {
-    //     std.debug.print("Creating ykyk\n", .{});
-    //     const includePathLen = 1 + 1 + modeInfo.cpp.include.len;
-    //
-    //     const include = try arena.alloc([]const u8, includePathLen);
-    //     include[0] = "src";
-    //     include[1] = pythonInc;
-    //
-    //     @memcpy(include[2..], modeInfo.cpp.include);
-    //
-    //     const cppstd = blk: {
-    //         for (modeInfo.cpp.otherFlags) |f| {
-    //             const stdflag = "-std=";
-    //             if (std.mem.startsWith(u8, f, stdflag)) {
-    //                 break :blk f[stdflag.len..];
-    //             }
-    //         }
-    //         break :blk "c++11";
-    //     };
-    //
-    //     var defines: std.ArrayList([]const u8) = .{};
-    //     defer defines.deinit(arena);
-    //
-    //     if (modeInfo.cpp.define) |d| {
-    //         var iter = d.map.iterator();
-    //
-    //         while (iter.next()) |k| {
-    //             if (k.value_ptr.*) |value| {
-    //                 if (value.len == 0) {
-    //                     try defines.append(arena, k.key_ptr.*);
-    //                 } else {
-    //                     try defines.append(
-    //                         arena,
-    //                         try std.fmt.allocPrint(
-    //                             arena,
-    //                             "{s}={s}",
-    //                             .{ k.key_ptr.*, value },
-    //                         ),
-    //                     );
-    //                 }
-    //             }
-    //         }
-    //     }
-    //
-    //     const config: CppPropsJson.Configuration = .{
-    //         .name = mode,
-    //         .includePath = include,
-    //         .defines = defines.items,
-    //         .cppStandard = cppstd,
-    //         .compilerArgs = modeInfo.cpp.otherFlags,
-    //         .compilerPath = "clang",
-    //         .browse = .{
-    //             .limitSymbolsToIncludedHeaders = false,
-    //             .path = include,
-    //         },
-    //     };
-    //
-    //     var value: CppPropsJson = undefined;
-    //
-    //     var configBuf: [1]CppPropsJson.Configuration = .{config};
-    //     value.configurations = &configBuf;
-    //     value.version = 4;
-    //
-    //     const cppPropsFile = try std.fs.createFileAbsolute(cCppProps, .{ .truncate = true });
-    //     defer cppPropsFile.close();
-    //     var cppPropsWriter = cppPropsFile.writer(&fileBuf);
-    //     const cpppropsiow = &cppPropsWriter.interface;
-    //
-    //     try std.json.fmt(value, .{}).format(cpppropsiow);
-    //
-    //     try cpppropsiow.flush();
-    // }
 
     try stdout.flush();
 }
