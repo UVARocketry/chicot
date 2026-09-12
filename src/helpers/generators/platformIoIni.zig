@@ -55,6 +55,7 @@ pub fn main(init: std.process.Init) !void {
     if (argIterator.next()) |_| {} else {
         return error.NoArgs;
     }
+    const projectName = argIterator.next() orelse return error.NoProjectName;
     const name = argIterator.next() orelse return error.NoFileArg;
     const pioCheckPyName = argIterator.next() orelse return error.NoFileArg;
     const pioContents = argIterator.next() orelse return error.NothingToDiff;
@@ -244,7 +245,7 @@ pub fn main(init: std.process.Init) !void {
 
             try outIow.print(" -Izig-out/include -Izig-out/include/depheaders", .{});
             for (deps.items) |dep| {
-                try outIow.print(" -Izig-out/include/{s}/{s}", .{ name, dep.name });
+                try outIow.print(" -Izig-out/include/{s}/{s}", .{ projectName, dep.name });
             }
             try outIow.print("\n", .{});
             try outIow.print("\n", .{});
