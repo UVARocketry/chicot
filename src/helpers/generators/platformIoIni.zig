@@ -243,6 +243,9 @@ pub fn main(init: std.process.Init) !void {
             }
 
             try outIow.print(" -Izig-out/include -Izig-out/include/depheaders", .{});
+            for (deps.items) |dep| {
+                try outIow.print(" -Izig-out/include/{s}/{s}", .{ name, dep.name });
+            }
             try outIow.print("\n", .{});
             try outIow.print("\n", .{});
         }
