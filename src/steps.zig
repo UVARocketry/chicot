@@ -207,6 +207,7 @@ pub fn addPlatformioIniStep(
     chicot: *std.Build.Dependency,
     pioDiffMode: bool,
     allocator: std.mem.Allocator,
+    projectName: []const u8,
 ) !void {
     const pioIniModule = b.addModule("pioIni", .{
         .root_source_file = chicot.path("src/helpers/generators/platformIoIni.zig"),
@@ -228,6 +229,7 @@ pub fn addPlatformioIniStep(
 
     const runPioIni = b.addRunArtifact(pioIniProgram);
 
+    runPioIni.addArg(projectName);
     const output = runPioIni.addOutputFileArg("platformio.ini");
     const outputCheckPioPy = runPioIni.addOutputFileArg("checkpio.py");
     if (pioDiffMode) {

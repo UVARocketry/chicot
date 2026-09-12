@@ -894,7 +894,14 @@ pub fn build(
         );
     }
 
-    try steps.addPlatformioIniStep(b, helpers, chicot, pioDiffMode, b.allocator);
+    try steps.addPlatformioIniStep(
+        b,
+        helpers,
+        chicot,
+        pioDiffMode,
+        b.allocator,
+        projectName,
+    );
 
     // timestamp("Step creation", &timestampStart);
 
